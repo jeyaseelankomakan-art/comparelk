@@ -43,12 +43,12 @@ $pdo->exec("
 $log = [];
 $log[] = '[' . date('Y-m-d H:i:s') . '] Importer started.';
 
-$stmt = $pdo->query("SELECT * FROM store_import_urls ORDER BY last_run ASC LIMIT 10");
+$stmt = $pdo->query("SELECT * FROM store_import_urls WHERE enabled = 1 ORDER BY last_run ASC LIMIT 10");
 $sources = $stmt->fetchAll();
 
 if (empty($sources)) {
     $log[] = 'No category import URLs configured in `store_import_urls`.';
-    $log[] = 'Add store category URLs via the database or admin to start importing.';
+    $log[] = 'Add store category URLs via Admin > Import Sources to start importing.';
     echo implode("\n", $log) . "\n";
     exit(0);
 }
@@ -69,12 +69,14 @@ foreach ($sources as $source) {
 
         $totalProcessed += $result['processed_count'];
 
-        $pdo->prepare("UPDATE store_import_urls SET last_run = NOW() WHERE id = ?")
-            ->execute([$source['id']]);
+        $pdo->prepare("UPDATE store_import_urls SET last_run = NOW(), last_result = ? WHERE id = ?")
+            ->execute([json_encode($result), $source['id']]);
 
     } catch (Exception $e) {
         $log[] = "  -> ERROR: " . $e->getMessage();
         $totalErrors++;
+        $pdo->prepare("UPDATE store_import_urls SET last_run = NOW(), last_result = ? WHERE id = ?")
+            ->execute([json_encode(['status' => 'error', 'message' => $e->getMessage()]), $source['id']]);
     }
 }
 

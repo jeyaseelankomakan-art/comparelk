@@ -426,3 +426,201 @@ class SingerParser implements CategoryParserInterface {
         return $items;
     }
 }
+
+/**
+ * Daraz Sri Lanka Parser - parses daraz.lk category listing pages
+ * Works with URLs like: https://www.daraz.lk/smartphones/
+ * Daraz embeds product data in a script tag as JSON (window.pageData or similar).
+ */
+class DarazParser implements CategoryParserInterface {
+    public function parseHtml(string $html, string $baseUrl): array {
+        $items = [];
+
+        // Strategy 1: Daraz embeds listing data as JSON inside <script> tags
+        // Look for patterns like: "listItems":[{...}] or window.pageData = {...}
+        if (preg_match('/\"listItems\"\s*:\s*(\[.*?\])\s*[,}]/s', $html, $m)) {
+            $listData = json_decode($m[1], true);
+            if (is_array($listData)) {
+                foreach ($listData as $prod) {
+                    $item = $this->extractDarazProduct($prod, $baseUrl);
+                    if ($item) $items[] = $item;
+                }
+            }
+        }
+
+        // Strategy 2: Look for mods->listItems in __NEXT_DATA__ or pageData JSON
+        if (empty($items) && preg_match('/window\.pageData\s*=\s*(\{.*?\});\s*<\/script>/s', $html, $m)) {
+            $pageData = json_decode($m[1], true);
+            if (is_array($pageData)) {
+                $listItems = $pageData['mods']['listItems'] ?? [];
+                foreach ($listItems as $prod) {
+                    $item = $this->extractDarazProduct($prod, $baseUrl);
+                    if ($item) $items[] = $item;
+                }
+            }
+        }
+
+        // Strategy 3: Fallback to JSON-LD
+        if (empty($items)) {
+            $generic = new GenericCategoryParser();
+            $items = $generic->parseHtml($html, $baseUrl);
+        }
+
+        return $items;
+    }
+
+    private function extractDarazProduct(array $prod, string $baseUrl): ?array {
+        $name  = $prod['name'] ?? $prod['title'] ?? null;
+        $url   = $prod['productUrl'] ?? $prod['itemUrl'] ?? $prod['url'] ?? null;
+        $price = $prod['price'] ?? $prod['priceShow'] ?? $prod['salePrice'] ?? null;
+        $img   = $prod['image'] ?? $prod['thumbUrl'] ?? null;
+        $sku   = $prod['itemId'] ?? $prod['nid'] ?? $prod['skuId'] ?? null;
+
+        if (!$name || !$price) return null;
+
+        // Cleanup price: remove "Rs. " prefix and commas
+        if (is_string($price)) {
+            $price = preg_replace('/[^0-9.]/', '', str_replace(',', '', $price));
+        }
+        $price = (float) $price;
+        if ($price <= 0) return null;
+
+        // Build full URL if relative
+        if ($url && strpos($url, '//') !== 0 && strpos($url, 'http') !== 0) {
+            $parsed = parse_url($baseUrl);
+            $url = ($parsed['scheme'] ?? 'https') . '://' . ($parsed['host'] ?? 'www.daraz.lk') . '/' . ltrim($url, '/');
+        }
+        if (!$url) return null;
+
+        // Stock status
+        $stockStatus = 'in_stock';
+        if (isset($prod['inStock']) && !$prod['inStock']) {
+            $stockStatus = 'out_of_stock';
+        }
+
+        // Brand
+        $brand = $prod['brandName'] ?? $prod['brand'] ?? null;
+
+        return [
+            'name'               => $name,
+            'product_url'        => $url,
+            'image_url'          => $img,
+            'price'              => $price,
+            'brand'              => $brand,
+            'model'              => null,
+            'stock_status'       => $stockStatus,
+            'source_product_key' => $sku ? (string) $sku : null,
+        ];
+    }
+}
+
+/**
+ * Buyabans Parser - parses buyabans.com product listing pages
+ * Works with WooCommerce-style grids: <ul class="products"> / <li class="product">
+ * Also works with URLs like: https://www.buyabans.com/product-category/televisions/
+ */
+class BuyabansParser implements CategoryParserInterface {
+    public function parseHtml(string $html, string $baseUrl): array {
+        $items = [];
+        $dom = new DOMDocument();
+        @$dom->loadHTML($html, LIBXML_NOERROR | LIBXML_NOWARNING);
+        $xpath = new DOMXPath($dom);
+
+        // WooCommerce product cards: li.product or div.product
+        $cards = $xpath->query('//li[contains(@class, "product")] | //div[contains(@class, "product-item")]');
+
+        foreach ($cards as $card) {
+            // Product link
+            $linkNode = $xpath->query('.//a[contains(@href, "/product/") or contains(@href, "/shop/")]', $card)->item(0);
+            if (!$linkNode) {
+                // Fallback: first <a> tag with an href
+                $linkNode = $xpath->query('.//a[@href]', $card)->item(0);
+            }
+            if (!$linkNode) continue;
+
+            $url = trim($linkNode->getAttribute('href'));
+            if (!$url || $url === '#') continue;
+
+            // Product name
+            $nameNode = $xpath->query('.//h2 | .//h3 | .//h4 | .//*[contains(@class, "product-title")] | .//*[contains(@class, "woocommerce-loop-product__title")]', $card)->item(0);
+            $name = $nameNode ? trim($nameNode->textContent) : '';
+            if (empty($name)) continue;
+
+            // Image
+            $imgNode = $xpath->query('.//img', $card)->item(0);
+            $imgUrl = '';
+            if ($imgNode) {
+                $imgUrl = $imgNode->getAttribute('data-src') ?: $imgNode->getAttribute('src');
+            }
+
+            // Price — look for <span class="amount"> or <bdi> inside price wrapper
+            $priceNode = $xpath->query('.//*[contains(@class, "price")]//*[contains(@class, "amount")] | .//*[contains(@class, "price")]//bdi', $card)->item(0);
+            $price = null;
+            if ($priceNode) {
+                $priceText = $priceNode->textContent;
+                $price = preg_replace('/[^0-9.]/', '', str_replace(',', '', $priceText));
+            }
+
+            // Fallback: look for Rs/LKR text in the card
+            if (!$price) {
+                $cardText = $card->textContent;
+                if (preg_match('/(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{2})?)/', $cardText, $pm)) {
+                    $price = str_replace(',', '', $pm[1]);
+                }
+            }
+
+            if (!$price || (float)$price <= 0) continue;
+
+            // Stock status
+            $stockStatus = 'in_stock';
+            $cardText = $card->textContent;
+            if (stripos($cardText, 'out of stock') !== false) {
+                $stockStatus = 'out_of_stock';
+            }
+
+            // Brand from title
+            $brand = null;
+            $knownBrands = ['Samsung', 'Apple', 'LG', 'Sony', 'Panasonic', 'Abans', 'Philips', 'Hisense',
+                            'Singer', 'Nokia', 'Xiaomi', 'Oppo', 'Vivo', 'Huawei', 'Haier', 'Midea',
+                            'Beko', 'Bosch', 'Sharp', 'TCL', 'Whirlpool', 'Electrolux'];
+            $nameLower = strtolower($name);
+            foreach ($knownBrands as $b) {
+                if (strpos($nameLower, strtolower($b)) !== false) {
+                    $brand = $b;
+                    break;
+                }
+            }
+
+            // Resolve relative URL
+            if (strpos($url, 'http') !== 0) {
+                $parsed = parse_url($baseUrl);
+                if (strpos($url, '//') === 0) {
+                    $url = ($parsed['scheme'] ?? 'https') . ':' . $url;
+                } elseif (strpos($url, '/') === 0) {
+                    $url = ($parsed['scheme'] ?? 'https') . '://' . ($parsed['host'] ?? '') . $url;
+                } else {
+                    $url = rtrim($baseUrl, '/') . '/' . $url;
+                }
+            }
+
+            $items[] = [
+                'name'               => $name,
+                'product_url'        => $url,
+                'image_url'          => $imgUrl,
+                'price'              => $price,
+                'brand'              => $brand,
+                'model'              => null,
+                'stock_status'       => $stockStatus,
+                'source_product_key' => null,
+            ];
+        }
+
+        // Fallback: if DOM parsing found nothing, try JSON-LD
+        if (empty($items)) {
+            $generic = new GenericCategoryParser();
+            $items = $generic->parseHtml($html, $baseUrl);
+        }
+
+        return $items;
+    }
+}
