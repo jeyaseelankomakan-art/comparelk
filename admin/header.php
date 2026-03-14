@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Admin Header - compare.lk
  */
@@ -33,7 +34,7 @@ $adminUser = $_SESSION['admin_username'] ?? 'Admin';
     <link rel="stylesheet" href="<?= url('assets/css/fonts.css') ?>">
     <link rel="stylesheet" href="<?= url('assets/css/admin.css') ?>">
     <script>
-        (function () {
+        (function() {
             var t = localStorage.getItem('theme') || 'light';
             document.documentElement.setAttribute('data-theme', t);
             if (t === 'dark') document.documentElement.classList.add('theme-dark');
@@ -87,31 +88,32 @@ $adminUser = $_SESSION['admin_username'] ?? 'Admin';
                         class="sidebar-link <?= $adminPage === 'imported-products.php' ? 'active' : '' ?>">
                         <i class="bi bi-cloud-arrow-down"></i> Imported Products
                     </a>
-                    <a href="<?= url('admin/prices.php') ?>"
-                        class="sidebar-link <?= $adminPage === 'prices.php' ? 'active' : '' ?>">
-                        <i class="bi bi-tags"></i> <?= e(t('admin_prices')) ?>
-                    </a>
 
-                    <span class="nav-section-label"><?= e(t('admin_reports')) ?></span>
-                    <a href="<?= url('admin/price-log.php') ?>"
-                        class="sidebar-link <?= $adminPage === 'price-log.php' ? 'active' : '' ?>">
-                        <i class="bi bi-journal-text"></i> <?= e(t('admin_price_log')) ?>
-                    </a>
-                    <a href="<?= url('admin/messages.php') ?>"
-                        class="sidebar-link <?= $adminPage === 'messages.php' ? 'active' : '' ?>">
-                        <i class="bi bi-envelope"></i> <?= e(t('admin_messages')) ?>
-                    </a>
+                        <a href="<?= url('admin/prices.php') ?>"
+                            class="sidebar-link <?= $adminPage === 'prices.php' ? 'active' : '' ?>">
+                            <i class="bi bi-tags"></i> <?= e(t('admin_prices')) ?>
+                        </a>
 
-                    <span class="nav-section-label"><?= e(t('admin_tools')) ?></span>
-                    <a href="<?= url('admin/scraper.php') ?>"
-                        class="sidebar-link <?= $adminPage === 'scraper.php' ? 'active' : '' ?>">
-                        <i class="bi bi-cloud-download"></i> <?= e(t('admin_scraper')) ?>
-                    </a>
+                        <span class="nav-section-label"><?= e(t('admin_reports')) ?></span>
+                        <a href="<?= url('admin/price-log.php') ?>"
+                            class="sidebar-link <?= $adminPage === 'price-log.php' ? 'active' : '' ?>">
+                            <i class="bi bi-journal-text"></i> <?= e(t('admin_price_log')) ?>
+                        </a>
+                        <a href="<?= url('admin/messages.php') ?>"
+                            class="sidebar-link <?= $adminPage === 'messages.php' ? 'active' : '' ?>">
+                            <i class="bi bi-envelope"></i> <?= e(t('admin_messages')) ?>
+                        </a>
 
-                    <span class="nav-section-label"><?= e(t('admin_site')) ?></span>
-                    <a href="<?= url('') ?>" target="_blank" class="sidebar-link">
-                        <i class="bi bi-box-arrow-up-right"></i> <?= e(t('admin_view_site')) ?>
-                    </a>
+                        <span class="nav-section-label"><?= e(t('admin_tools')) ?></span>
+                        <a href="<?= url('admin/scraper.php') ?>"
+                            class="sidebar-link <?= $adminPage === 'scraper.php' ? 'active' : '' ?>">
+                            <i class="bi bi-cloud-download"></i> <?= e(t('admin_scraper')) ?>
+                        </a>
+
+                        <span class="nav-section-label"><?= e(t('admin_site')) ?></span>
+                        <a href="<?= url('') ?>" target="_blank" class="sidebar-link">
+                            <i class="bi bi-box-arrow-up-right"></i> <?= e(t('admin_view_site')) ?>
+                        </a>
                 </nav>
 
                 <!-- Footer -->

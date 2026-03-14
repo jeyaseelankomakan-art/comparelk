@@ -348,4 +348,81 @@ class GenericCategoryParser implements CategoryParserInterface {
     }
 }
 
-// Add more parsers like DarazParser, SingerParser etc. following the CategoryParserInterface
+/**
+ * Singer Sri Lanka Parser - parses singersl.com product listing pages
+ * Works with URLs like: https://www.singersl.com/products?category=-@243
+ */
+class SingerParser implements CategoryParserInterface {
+    public function parseHtml(string $html, string $baseUrl): array {
+        $items = [];
+        $dom = new DOMDocument();
+        @$dom->loadHTML($html, LIBXML_NOERROR | LIBXML_NOWARNING);
+        $xpath = new DOMXPath($dom);
+
+        // Each product card lives inside div.productfilter
+        $cards = $xpath->query('//div[contains(@class, "productfilter")]');
+
+        foreach ($cards as $card) {
+            // Product link & image
+            $linkNode = $xpath->query('.//a[contains(@href, "/product/")]', $card)->item(0);
+            if (!$linkNode) continue;
+
+            $url = trim($linkNode->getAttribute('href'));
+            $imgNode = $xpath->query('.//img[contains(@class, "card-img-top")]', $card)->item(0);
+            $name = $imgNode ? trim($imgNode->getAttribute('alt')) : '';
+            $imgUrl = $imgNode ? trim($imgNode->getAttribute('src')) : '';
+
+            if (empty($name) || empty($url)) continue;
+
+            // Product code / SKU (used as source_product_key)
+            $codeNode = $xpath->query('.//p[contains(@class, "product__code")]', $card)->item(0);
+            $sku = $codeNode ? trim($codeNode->nodeValue) : null;
+
+            // Price extraction — find all text nodes containing "Rs"
+            // Singer shows: "Rs  499,999" (sale) then "Rs  541,099" (original)
+            // We want the first (sale / current) price
+            $cardText = $card->nodeValue;
+            preg_match_all('/Rs\s+([\d,]+(?:\.\d{2})?)/', $cardText, $priceMatches);
+
+            $price = null;
+            if (!empty($priceMatches[1])) {
+                // First match = current/sale price
+                $price = str_replace(',', '', $priceMatches[1][0]);
+            }
+
+            if (!$price || (float)$price <= 0) continue;
+
+            // Stock status — look for "Out of Stock" text or "Pre Order"
+            $stockStatus = 'in_stock';
+            if (stripos($cardText, 'out of stock') !== false) {
+                $stockStatus = 'out_of_stock';
+            } elseif (stripos($cardText, 'pre order') !== false) {
+                $stockStatus = 'limited';
+            }
+
+            // Brand extraction from product name
+            $brand = null;
+            $knownBrands = ['Samsung', 'Apple', 'Honor', 'Nubia', 'Nokia', 'Xiaomi', 'Oppo', 'Vivo', 'Huawei', 'Realme', 'OnePlus', 'Google'];
+            $nameLower = strtolower($name);
+            foreach ($knownBrands as $b) {
+                if (strpos($nameLower, strtolower($b)) !== false) {
+                    $brand = $b;
+                    break;
+                }
+            }
+
+            $items[] = [
+                'name'               => $name,
+                'product_url'        => $url,
+                'image_url'          => $imgUrl,
+                'price'              => $price,
+                'brand'              => $brand,
+                'model'              => $sku,
+                'stock_status'       => $stockStatus,
+                'source_product_key' => $sku,
+            ];
+        }
+
+        return $items;
+    }
+}

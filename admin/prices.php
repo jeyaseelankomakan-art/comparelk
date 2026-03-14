@@ -2,6 +2,27 @@
 /**
  * Admin Prices Management - compare.lk
  */
+require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/functions.php';
+
+ensureSessionStarted();
+requireAdminLogin();
+
+$pdo = getDB();
+
+// Handle delete price BEFORE any output (requires redirect)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_price_id'])) {
+    if (csrf_verify()) {
+        $delId = (int) $_POST['delete_price_id'];
+        $delPid = (int) ($_POST['back_product_id'] ?? 0);
+        $pdo->prepare("DELETE FROM product_prices WHERE id=?")->execute([$delId]);
+        if ($delPid) {
+            header('Location: ' . url('admin/prices.php') . '?product_id=' . $delPid . '&deleted=1');
+            exit;
+        }
+    }
+}
+
 $adminTitle = 'Price Management';
 require_once __DIR__ . '/header.php';
 
@@ -67,19 +88,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['price'])) {
     }
 }
 
-// Delete price (POST with CSRF required)
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_price_id'])) {
+// Delete price fallback (no redirect needed — already handled before header.php for redirect cases)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_price_id']) && empty($_POST['back_product_id'])) {
     if (!csrf_verify()) {
         $error = 'Security check failed.';
     } else {
         $delId = (int) $_POST['delete_price_id'];
-        $delPid = (int) ($_POST['back_product_id'] ?? 0);
         $pdo->prepare("DELETE FROM product_prices WHERE id=?")->execute([$delId]);
         $msg = 'Price entry removed.';
-        if ($delPid) {
-            header('Location: ' . url('admin/prices.php') . '?product_id=' . $delPid . '&deleted=1');
-            exit;
-        }
     }
 }
 
