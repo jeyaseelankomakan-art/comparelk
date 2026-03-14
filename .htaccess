@@ -1,0 +1,5 @@
+RewriteEngine On
+
+# Redirect root about.php and contact.php to pages/ (if users manually navigate)
+RewriteRule ^about\.php$ pages/about.php [L,QSA]
+RewriteRule ^contact\.php$ pages/contact.php [L,QSA]
