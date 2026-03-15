@@ -282,22 +282,19 @@ function scrapeCategoryPage(PDO $pdo, int $storeId, string $url, string $parserC
 
     $result = ['status' => 'error', 'message' => '', 'processed_count' => 0];
 
-    $context = stream_context_create([
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+    curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 20);
+    $html = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
 
-        'http' => ['timeout' => 20, 'user_agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/100.0.4896.75 Safari/537.36'],
-
-        'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]
-
-    ]);
-
-    $html = @file_get_contents($url, false, $context);
-
-    if ($html === false) {
-
-        $result['message'] = "Could not fetch URL: $url";
-
+    if ($html === false || $httpCode >= 400) {
+        $result['message'] = "Could not fetch URL: $url (HTTP $httpCode)";
         return $result;
-
     }
 
     if (!class_exists($parserClass)) {
