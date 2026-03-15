@@ -253,7 +253,8 @@ require_once __DIR__ . '/header.php';
                 <div class="alert alert-success py-2 small"><i class="bi bi-check-circle me-1"></i><?= e($msg) ?></div>
                 <?php endif; ?>
 
-                <form method="post" action="<?= url('admin/import-sources.php') ?>">
+                <form method="post" action="<?= url('admin/import-sources.php') ?>"
+                      onsubmit="const b=this.querySelector('button[type=submit]'); b.innerHTML='<i class=\'bi bi-arrow-repeat spin me-1\'></i>Adding...'; b.disabled=true;">
                     <?= csrf_field() ?>
                     <input type="hidden" name="action" value="add">
 
@@ -401,7 +402,8 @@ require_once __DIR__ . '/header.php';
                                 </td>
                                 <td class="text-end" style="white-space:nowrap;">
                                     <!-- Run one -->
-                                    <form method="post" action="<?= url('admin/import-sources.php') ?>" class="d-inline">
+                                    <form method="post" action="<?= url('admin/import-sources.php') ?>" class="d-inline"
+                                          onsubmit="const b=this.querySelector('button[type=submit]'); b.innerHTML='<i class=\'bi bi-arrow-repeat spin\'></i>'; b.disabled=true;">
                                         <?= csrf_field() ?>
                                         <input type="hidden" name="action" value="run_one">
                                         <input type="hidden" name="id" value="<?= (int)$src['id'] ?>">
@@ -411,7 +413,8 @@ require_once __DIR__ . '/header.php';
                                     </form>
 
                                     <!-- Toggle -->
-                                    <form method="post" action="<?= url('admin/import-sources.php') ?>" class="d-inline">
+                                    <form method="post" action="<?= url('admin/import-sources.php') ?>" class="d-inline"
+                                          onsubmit="const b=this.querySelector('button[type=submit]'); b.innerHTML='<i class=\'bi bi-arrow-repeat spin\'></i>'; b.disabled=true;">
                                         <?= csrf_field() ?>
                                         <input type="hidden" name="action" value="toggle">
                                         <input type="hidden" name="id" value="<?= (int)$src['id'] ?>">
@@ -423,7 +426,7 @@ require_once __DIR__ . '/header.php';
 
                                     <!-- Delete -->
                                     <form method="post" action="<?= url('admin/import-sources.php') ?>" class="d-inline"
-                                          onsubmit="return confirm('Delete this import source?');">
+                                          onsubmit="if(confirm('Delete this import source?')) { const b=this.querySelector('button[type=submit]'); b.innerHTML='<i class=\'bi bi-arrow-repeat spin\'></i>'; b.disabled=true; return true; } return false;">
                                         <?= csrf_field() ?>
                                         <input type="hidden" name="action" value="delete">
                                         <input type="hidden" name="id" value="<?= (int)$src['id'] ?>">

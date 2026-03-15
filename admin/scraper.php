@@ -312,7 +312,7 @@ $links = $linksStmt->fetchAll(PDO::FETCH_ASSOC);
                 <div class="alert alert-danger py-2 small"><i
                         class="bi bi-exclamation-triangle me-1"></i><?= htmlspecialchars($error) ?></div>
                 <?php endif; ?>
-                <form method="get" action="<?= url('admin/scraper.php') ?>" class="mb-0">
+                <form method="get" action="<?= url('admin/scraper.php') ?>" class="mb-0" onsubmit="const b=this.querySelector('button[type=submit]'); b.innerHTML='<i class=\'bi bi-arrow-repeat spin me-1\'></i>Fetching...'; b.disabled=true;">
                     <div class="input-group">
                         <input type="url" name="url" class="form-control"
                             placeholder="https://www.daraz.lk/products/..." value="<?= htmlspecialchars($fetchUrl) ?>"
@@ -370,7 +370,7 @@ $links = $linksStmt->fetchAll(PDO::FETCH_ASSOC);
                 <?php endif; ?>
 
                 <!-- Quick Add Price Form -->
-                <form method="post" action="<?= url('admin/scraper.php') ?>" class="quick-add-form">
+                <form method="post" action="<?= url('admin/scraper.php') ?>" class="quick-add-form" onsubmit="const b=this.querySelector('button[type=submit]'); b.innerHTML='<i class=\'bi bi-arrow-repeat spin me-1\'></i>Adding...'; b.disabled=true;">
                     <?= csrf_field() ?>
                     <input type="hidden" name="action" value="quick_add_price">
                     <input type="hidden" name="back_url" value="<?= htmlspecialchars($fetchUrl) ?>">
@@ -469,7 +469,8 @@ $links = $linksStmt->fetchAll(PDO::FETCH_ASSOC);
                 <h6 class="mb-0"><i class="bi bi-link-45deg me-2 text-primary"></i>Auto-scrape links
                     <span class="badge bg-secondary ms-1" style="font-size:.7rem;"><?= count($links) ?></span>
                 </h6>
-                <form method="post" action="<?= url('admin/scraper.php') ?>" class="m-0">
+                <form method="post" action="<?= url('admin/scraper.php') ?>" class="m-0"
+                      onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').innerHTML='<i class=\'bi bi-arrow-repeat spin me-1\'></i>Running…';">
                     <?= csrf_field() ?>
                     <input type="hidden" name="action" value="run_all">
                     <button type="submit" class="btn btn-sm btn-outline-primary">
@@ -487,7 +488,7 @@ $links = $linksStmt->fetchAll(PDO::FETCH_ASSOC);
                 <?php endif; ?>
 
                 <!-- Add-link form -->
-                <form method="post" action="<?= url('admin/scraper.php') ?>" class="row g-2 align-items-end mb-2">
+                <form method="post" action="<?= url('admin/scraper.php') ?>" class="row g-2 align-items-end mb-2" onsubmit="const b=this.querySelector('button[type=submit]'); b.innerHTML='<i class=\'bi bi-arrow-repeat spin\'></i>'; b.disabled=true;">
                     <?= csrf_field() ?>
                     <input type="hidden" name="action" value="add_link">
                     <div class="col-md-4">
@@ -570,7 +571,8 @@ $links = $linksStmt->fetchAll(PDO::FETCH_ASSOC);
                                     <?= $l['last_scraped_at'] ? e(date('d M H:i', strtotime($l['last_scraped_at']))) : '—' ?>
                                 </td>
                                 <td>
-                                    <form method="post" action="<?= url('admin/scraper.php') ?>" class="m-0">
+                                    <form method="post" action="<?= url('admin/scraper.php') ?>" class="m-0"
+                                          onsubmit="const b=this.querySelector('button[type=submit]'); b.innerHTML='<i class=\'bi bi-arrow-repeat spin\'></i>'; b.disabled=true;">
                                         <?= csrf_field() ?>
                                         <input type="hidden" name="action" value="toggle">
                                         <input type="hidden" name="id" value="<?= (int) $l['id'] ?>">
