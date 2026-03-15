@@ -84,10 +84,7 @@ $adminUser = $_SESSION['admin_username'] ?? 'Admin';
                         class="sidebar-link <?= $adminPage === 'products.php' ? 'active' : '' ?>">
                         <i class="bi bi-box-seam"></i> <?= e(t('admin_products')) ?>
                     </a>
-                    <a href="<?= url('admin/imported-products.php') ?>"
-                        class="sidebar-link <?= $adminPage === 'imported-products.php' ? 'active' : '' ?>">
-                        <i class="bi bi-cloud-arrow-down"></i> Imported Products
-                    </a>
+
                     <a href="<?= url('admin/import-sources.php') ?>"
                         class="sidebar-link <?= $adminPage === 'import-sources.php' ? 'active' : '' ?>">
                         <i class="bi bi-rss"></i> Import Sources

@@ -1,9 +1,5 @@
 <?php
-/**
- * Admin Import Sources - compare.lk
- * Manage store category URLs for automatic product discovery.
- * NOTE: All PHP logic (including redirects) MUST run before header.php is included.
- */
+
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/functions.php';
 require_once __DIR__ . '/../includes/product_importer.php';
@@ -13,7 +9,6 @@ requireAdminLogin();
 
 $pdo = getDB();
 
-// Ensure the import sources table exists
 $pdo->exec("
     CREATE TABLE IF NOT EXISTS store_import_urls (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -29,7 +24,6 @@ $pdo->exec("
     ) ENGINE=InnoDB
 ");
 
-// Also add columns if they don't exist (for existing tables)
 try { $pdo->exec("ALTER TABLE store_import_urls ADD COLUMN last_result TEXT DEFAULT NULL"); } catch (Exception $e) {}
 try { $pdo->exec("ALTER TABLE store_import_urls ADD COLUMN enabled TINYINT(1) NOT NULL DEFAULT 1"); } catch (Exception $e) {}
 try { $pdo->exec("ALTER TABLE store_import_urls ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP"); } catch (Exception $e) {}
@@ -37,7 +31,6 @@ try { $pdo->exec("ALTER TABLE store_import_urls ADD COLUMN created_at DATETIME D
 $msg = '';
 $error = '';
 
-// Available parser classes
 $availableParsers = [
     'GenericCategoryParser' => 'Generic (JSON-LD)',
     'SingerParser'          => 'Singer Sri Lanka',
@@ -45,7 +38,6 @@ $availableParsers = [
     'BuyabansParser'        => 'Buyabans.com',
 ];
 
-// Handle POST actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!csrf_verify()) {
         $error = 'Security check failed. Please refresh and try again.';
@@ -91,7 +83,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($source) {
                 try {
-                    $result = scrapeCategoryPage($pdo, $source['store_id'], $source['category_url'], $source['parser_class']);
+                    $categoryId = !empty($source['target_category_id']) ? (int) $source['target_category_id'] : null;
+                    $result = scrapeCategoryPage($pdo, $source['store_id'], $source['category_url'], $source['parser_class'], $categoryId);
                     $resultJson = json_encode($result);
                     $pdo->prepare("UPDATE store_import_urls SET last_run = NOW(), last_result = ? WHERE id = ?")
                         ->execute([$resultJson, $id]);
@@ -117,7 +110,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             foreach ($sources as $source) {
                 try {
-                    $result = scrapeCategoryPage($pdo, $source['store_id'], $source['category_url'], $source['parser_class']);
+                    $categoryId = !empty($source['target_category_id']) ? (int) $source['target_category_id'] : null;
+                    $result = scrapeCategoryPage($pdo, $source['store_id'], $source['category_url'], $source['parser_class'], $categoryId);
                     $pdo->prepare("UPDATE store_import_urls SET last_run = NOW(), last_result = ? WHERE id = ?")
                         ->execute([json_encode($result), $source['id']]);
                     $totalProcessed += $result['processed_count'];
@@ -128,12 +122,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $pdo->prepare("UPDATE store_import_urls SET last_run = NOW(), last_result = ? WHERE id = ?")
                         ->execute([json_encode(['status' => 'error', 'message' => $e->getMessage()]), $source['id']]);
                 }
-                usleep(300000); // 0.3s between requests
+                usleep(300000); 
             }
             $msg = "Import complete! Sources OK: {$ok}, Failed: {$fail}. Total products processed: {$totalProcessed}";
         }
 
-        // Redirect after POST to prevent re-submit
         if ($msg || $error) {
             $_SESSION['import_msg'] = $msg;
             $_SESSION['import_error'] = $error;
@@ -142,12 +135,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Retrieve flash messages
 $msg   = $_SESSION['import_msg'] ?? '';
 $error = $_SESSION['import_error'] ?? '';
 unset($_SESSION['import_msg'], $_SESSION['import_error']);
 
-// Data for forms
 $allStores     = $pdo->query("SELECT id, name FROM stores ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
 $allCategories = $pdo->query("SELECT id, name FROM categories ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
 $sources       = $pdo->query("
@@ -157,11 +148,6 @@ $sources       = $pdo->query("
     LEFT JOIN categories c ON iu.target_category_id = c.id
     ORDER BY s.name, iu.id
 ")->fetchAll(PDO::FETCH_ASSOC);
-
-// Pending scraped count
-$pendingCount = $pdo->query("SELECT COUNT(*) FROM scraped_products WHERE status = 'pending'")->fetchColumn();
-
-// ── All redirects done above. Now safe to output HTML. ──────────────────────
 $adminTitle = 'Import Sources';
 require_once __DIR__ . '/header.php';
 ?>
@@ -245,15 +231,6 @@ require_once __DIR__ . '/header.php';
 .pending-alert i { font-size: 1.2rem; color: #f6a623; }
 </style>
 
-<?php if ($pendingCount > 0): ?>
-<div class="pending-alert">
-    <i class="bi bi-exclamation-circle-fill"></i>
-    <div>
-        <strong><?= $pendingCount ?></strong> imported product<?= $pendingCount > 1 ? 's' : '' ?> pending review.
-        <a href="<?= url('admin/imported-products.php') ?>" class="ms-2 fw-600">Review now →</a>
-    </div>
-</div>
-<?php endif; ?>
 
 <div class="import-layout">
 
@@ -340,8 +317,8 @@ require_once __DIR__ . '/header.php';
                 <ol class="small text-muted mb-0" style="padding-left:1.1rem; line-height:1.8;">
                     <li>Add store category page URLs here</li>
                     <li>Click <strong>"Run"</strong> or set up a cron job</li>
-                    <li>Products are auto-matched or queued for review</li>
-                    <li>Review new products in <a href="<?= url('admin/imported-products.php') ?>">Imported Products</a></li>
+                    <li>Products are auto-extracted from the source directly</li>
+                    <li>They are instantly added to the live <a href="<?= url('admin/products.php') ?>">Products</a> list automatically</li>
                 </ol>
                 <hr class="my-2">
                 <p class="small text-muted mb-0">
