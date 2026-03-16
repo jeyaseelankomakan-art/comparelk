@@ -541,6 +541,108 @@ class GenericCategoryParser implements CategoryParserInterface {
 
 }
 
+// Kapruka doesn't use JSON-LD for their product listings — each product card is a plain
+// <a href="/buyonline/..."> tag containing an image, a name div, and a price span.
+// This parser walks the DOM to find those cards and extracts the fields we need.
+// The SKU is pulled from the /kid/ segment of the product URL, which is stable across scrape runs.
+class KaprukaCategoryParser implements CategoryParserInterface {
+
+    public function parseHtml(string $html, string $baseUrl): array {
+
+        $items = [];
+
+        $dom = new DOMDocument();
+        @$dom->loadHTML($html, LIBXML_NOERROR | LIBXML_NOWARNING);
+        $xpath = new DOMXPath($dom);
+
+        // Every product card on Kapruka category pages is wrapped in an <a> that links
+        // to a /buyonline/ path. That's the most reliable selector we have.
+        $cards = $xpath->query('//a[contains(@href, "/buyonline/")]');
+
+        foreach ($cards as $card) {
+
+            $url = trim($card->getAttribute('href'));
+
+            if (empty($url)) continue;
+
+            // Resolve relative URLs to absolute using the base URL's scheme + host
+            if (strpos($url, 'http') !== 0) {
+                $parsed = parse_url($baseUrl);
+                $url = ($parsed['scheme'] ?? 'https') . '://' . ($parsed['host'] ?? 'www.kapruka.com') . '/' . ltrim($url, '/');
+            }
+
+            // The product image is always the first <img> inside the card
+            $imgNode = $xpath->query('.//img', $card)->item(0);
+            $imgUrl  = '';
+            if ($imgNode) {
+                // Prefer data-src (lazy-loaded) over the placeholder src
+                $imgUrl = $imgNode->getAttribute('data-src') ?: $imgNode->getAttribute('src');
+                $imgUrl = trim($imgUrl);
+            }
+
+            // Kapruka puts the product name in the first text-heavy <div> inside the card.
+            // We collect all direct child <div> elements and pick the one with the most text.
+            $divs     = $xpath->query('.//div', $card);
+            $name     = '';
+            $maxLen   = 0;
+
+            foreach ($divs as $div) {
+                // Skip divs that contain child divs — those are wrappers, not the name
+                $childDivs = $xpath->query('div', $div);
+                if ($childDivs->length > 0) continue;
+
+                $text = trim(preg_replace('/\s+/', ' ', $div->textContent));
+
+                // Price spans end up inside divs too; skip anything that looks like a price
+                if (preg_match('/RS\./i', $text)) continue;
+
+                if (strlen($text) > $maxLen) {
+                    $maxLen = strlen($text);
+                    $name   = $text;
+                }
+            }
+
+            if (empty($name)) continue;
+
+            // Price is always in a <span> that contains the "RS." prefix
+            $priceNode = $xpath->query('.//span[contains(., "RS.")]', $card)->item(0);
+
+            if (!$priceNode) continue;
+
+            $priceRaw = trim($priceNode->textContent);
+
+            // Strip "RS." and commas, keep only the numeric part
+            $price = (float) preg_replace('/[^0-9.]/', '', str_replace(',', '', $priceRaw));
+
+            if ($price <= 0) continue;
+
+            // Extract the SKU from the /kid/ segment: .../kid/ef_pc_elec0v4463pod00068fdp
+            $sku = null;
+            if (preg_match('#/kid/([^/?#]+)#', $url, $m)) {
+                $sku = $m[1];
+            }
+
+            $items[] = [
+
+                'name'               => $name,
+                'product_url'        => $url,
+                'image_url'          => $imgUrl ?: null,
+                'price'              => $price,
+                'brand'              => null, // extractBrandFromTitle() will fill this in later
+                'model'              => null,
+                'stock_status'       => 'in_stock',
+                'source_product_key' => $sku,
+
+            ];
+
+        }
+
+        return $items;
+
+    }
+
+}
+
 // Singer Sri Lanka uses a custom WooCommerce-ish theme with specific CSS classes.
 // The generic JSON-LD parser doesn't reliably pick up their category pages,
 // so this parser directly walks the DOM for their product card structure.
@@ -761,152 +863,224 @@ class DarazParser implements CategoryParserInterface {
 
 }
 
-// Buyabans runs a WooCommerce store so their markup follows standard WC patterns.
-// We look for product cards and try a couple of price selectors before falling
-// back to a regex on the raw card text.
+// BuyAbans (buyabans.com) loads products via an AJAX JSON endpoint rather than embedding
+// them in the page HTML. When the category page loads, JavaScript calls:
+//   GET /product-list?category_id={id}&sort=new_arrivals&is_search_list=false
+// which returns a JSON object with an "html" key containing an escaped HTML fragment.
+// This parser hits that endpoint directly with cURL (no browser needed) and then
+// walks the resulting DOM using BuyAbans' known CSS class names.
 class BuyabansParser implements CategoryParserInterface {
 
     public function parseHtml(string $html, string $baseUrl): array {
 
-        $items = [];
+        // Step 1: Extract category_id from the URL the admin configured.
+        // BuyAbans category pages look like:
+        //   https://buyabans.com/mobile-phones        (no ID in URL — we'll try the page)
+        //   https://buyabans.com/category?id=15       (explicit ID)
+        // If we can't find an ID we fall back to scraping the page HTML directly.
+        $categoryId = $this->extractCategoryId($html, $baseUrl);
 
-        $dom = new DOMDocument();
-        @$dom->loadHTML($html, LIBXML_NOERROR | LIBXML_NOWARNING);
-        $xpath = new DOMXPath($dom);
+        $productHtml = '';
 
-        // WooCommerce product cards are usually <li class="product"> or similar
-        $cards = $xpath->query('//li[contains(@class, "product")] | //div[contains(@class, "product-item")]');
+        if ($categoryId) {
 
-        foreach ($cards as $card) {
+            // Step 2: Hit the AJAX endpoint that actually contains the product data.
+            // We send a browser-like UA so requests aren't rejected.
+            $apiUrl = 'https://buyabans.com/product-list?category_id=' . $categoryId
+                    . '&stamp_banner_id=0&sort=new_arrivals&is_search_list=false';
 
-            // Try to find the product link — prefer ones that look like product/shop paths
-            $linkNode = $xpath->query('.//a[contains(@href, "/product/") or contains(@href, "/shop/")]', $card)->item(0);
+            $ch = curl_init($apiUrl);
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_TIMEOUT        => 20,
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_HTTPHEADER     => [
+                    'Accept: application/json, text/javascript, */*; q=0.01',
+                    'X-Requested-With: XMLHttpRequest',
+                    'Referer: ' . $baseUrl,
+                ],
+                CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            ]);
 
-            if (!$linkNode) {
+            $apiResponse = curl_exec($ch);
+            curl_close($ch);
 
-                // Some cards wrap the whole thing in a plain <a>
-                $linkNode = $xpath->query('.//a[@href]', $card)->item(0);
+            if ($apiResponse) {
 
-            }
+                // Step 3: The response is a JSON object; the "html" key holds the product cards.
+                $decoded = json_decode($apiResponse, true);
 
-            if (!$linkNode) continue;
+                if (isset($decoded['html'])) {
 
-            $url = trim($linkNode->getAttribute('href'));
+                    // The HTML is JSON-encoded so unicode sequences and \/ are already unescaped by json_decode
+                    $productHtml = $decoded['html'];
 
-            if (!$url || $url === '#') continue;
+                } elseif (is_string($apiResponse) && strpos($apiResponse, 'product-list-item') !== false) {
 
-            // Product name is usually in a heading element or a WC title class
-            $nameNode = $xpath->query('.//h2 | .//h3 | .//h4 | .//*[contains(@class, "product-title")] | .//*[contains(@class, "woocommerce-loop-product__title")]', $card)->item(0);
-            $name     = $nameNode ? trim($nameNode->textContent) : '';
-
-            if (empty($name)) continue;
-
-            // Grab the image — prefer lazy-loaded src (data-src) over the placeholder
-            $imgNode = $xpath->query('.//img', $card)->item(0);
-            $imgUrl  = '';
-
-            if ($imgNode) {
-
-                $imgUrl = $imgNode->getAttribute('data-src') ?: $imgNode->getAttribute('src');
-
-            }
-
-            // Try the WC-standard price markup first
-            $priceNode = $xpath->query('.//*[contains(@class, "price")]//*[contains(@class, "amount")] | .//*[contains(@class, "price")]//bdi', $card)->item(0);
-            $price     = null;
-
-            if ($priceNode) {
-
-                $priceText = $priceNode->textContent;
-                $price     = preg_replace('/[^0-9.]/', '', str_replace(',', '', $priceText));
-
-            }
-
-            // If that didn't work, just scan the card text for any Rs. amount
-            if (!$price) {
-
-                $cardText = $card->textContent;
-
-                if (preg_match('/(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{2})?)/', $cardText, $pm)) {
-
-                    $price = str_replace(',', '', $pm[1]);
+                    // Fallback: some versions return raw HTML directly without a JSON wrapper
+                    $productHtml = $apiResponse;
 
                 }
 
             }
-
-            if (!$price || (float)$price <= 0) continue;
-
-            // Check for out-of-stock notice anywhere in the card
-            $stockStatus = 'in_stock';
-            $cardText    = $card->textContent;
-
-            if (stripos($cardText, 'out of stock') !== false) {
-
-                $stockStatus = 'out_of_stock';
-
-            }
-
-            // Same brand detection as everywhere else
-            $brand = null;
-            $knownBrands = ['Samsung', 'Apple', 'LG', 'Sony', 'Panasonic', 'Abans', 'Philips', 'Hisense',
-                            'Singer', 'Nokia', 'Xiaomi', 'Oppo', 'Vivo', 'Huawei', 'Haier', 'Midea',
-                            'Beko', 'Bosch', 'Sharp', 'TCL', 'Whirlpool', 'Electrolux'];
-
-            $nameLower = strtolower($name);
-
-            foreach ($knownBrands as $b) {
-
-                if (strpos($nameLower, strtolower($b)) !== false) {
-
-                    $brand = $b;
-                    break;
-
-                }
-
-            }
-
-            // Resolve relative URLs against the base URL of the category page
-            if (strpos($url, 'http') !== 0) {
-
-                $parsed = parse_url($baseUrl);
-
-                if (strpos($url, '//') === 0) {
-
-                    $url = ($parsed['scheme'] ?? 'https') . ':' . $url;
-
-                } elseif (strpos($url, '/') === 0) {
-
-                    $url = ($parsed['scheme'] ?? 'https') . '://' . ($parsed['host'] ?? '') . $url;
-
-                } else {
-
-                    $url = rtrim($baseUrl, '/') . '/' . $url;
-
-                }
-
-            }
-
-            $items[] = [
-
-                'name'               => $name,
-                'product_url'        => $url,
-                'image_url'          => $imgUrl,
-                'price'              => $price,
-                'brand'              => $brand,
-                'model'              => null, // Buyabans doesn't expose model numbers in listing pages
-                'stock_status'       => $stockStatus,
-                'source_product_key' => null, // no SKU available from the listing page
-
-            ];
 
         }
 
-        // If we got nothing from the DOM, give the generic JSON-LD parser a shot
-        if (empty($items)) {
+        // Step 4: If the AJAX approach failed, try to parse whatever HTML was passed in.
+        // This handles cases where the URL itself is the API endpoint.
+        if (empty($productHtml)) {
+            $productHtml = $html;
+        }
 
-            $generic = new GenericCategoryParser();
-            $items   = $generic->parseHtml($html, $baseUrl);
+        return $this->parseProductHtml($productHtml, $baseUrl);
+
+    }
+
+    // -------------------------------------------------------------------------
+    // Extract the category ID from the page HTML.
+    // BuyAbans embeds it in the JS initialisation code, e.g.:
+    //   category_id: 15,
+    // or it may appear in an AJAX request captured from the network.
+    // -------------------------------------------------------------------------
+    private function extractCategoryId(string $html, string $baseUrl): ?int {
+
+        // Pattern 1: JS variable like  category_id: 15  or  "category_id":15
+        if (preg_match('/"?category_id"?\s*:\s*(\d+)/i', $html, $m)) {
+            return (int) $m[1];
+        }
+
+        // Pattern 2: URL query param  ?category_id=15  (when admin enters the API URL directly)
+        $parsedUrl = parse_url($baseUrl);
+        if (!empty($parsedUrl['query'])) {
+            parse_str($parsedUrl['query'], $qp);
+            if (!empty($qp['category_id'])) {
+                return (int) $qp['category_id'];
+            }
+        }
+
+        // Pattern 3: data attribute  data-category="15"
+        if (preg_match('/data-category[_-]?id\s*=\s*["\']?(\d+)/i', $html, $m)) {
+            return (int) $m[1];
+        }
+
+        return null;
+
+    }
+
+    // -------------------------------------------------------------------------
+    // Walk the product HTML fragment and extract items using BuyAbans' CSS classes.
+    // Each card is a  div.product-list-item  containing:
+    //   - .pro-name-compact   for the product name
+    //   - .selling-price      for the current price (last span wins when discounted)
+    //   - img.grid-product-img for the thumbnail
+    //   - <a href="...">      for the product URL (inside .product-imgage)
+    //   - data-product-id     on the wishlist button — used as our dedup SKU
+    // -------------------------------------------------------------------------
+    private function parseProductHtml(string $html, string $baseUrl): array {
+
+        $items = [];
+
+        $dom = new DOMDocument();
+        @$dom->loadHTML('<?xml encoding="utf-8"?>' . $html, LIBXML_NOERROR | LIBXML_NOWARNING);
+        $xpath = new DOMXPath($dom);
+
+        // Each BuyAbans product card sits inside div.product-list-item
+        $cards = $xpath->query('//*[contains(@class, "product-list-item")]');
+
+        foreach ($cards as $card) {
+
+            // --- Name ---
+            $nameNode = $xpath->query('.//*[contains(@class, "pro-name-compact")]', $card)->item(0);
+            if (!$nameNode) continue;
+
+            // Prefer the title attribute (never truncated) over textContent
+            $name = trim($nameNode->getAttribute('title') ?: $nameNode->textContent);
+            if (empty($name)) continue;
+
+            // --- Product URL ---
+            // The image anchor is the most reliable link — it always points to the product page
+            $linkNode = $xpath->query('.//*[contains(@class, "product-imgage")]//a[@href] | .//a[contains(@href, "buyabans.com") or starts-with(@href, "/")]', $card)->item(0);
+            if (!$linkNode) {
+                $linkNode = $xpath->query('.//a[@href]', $card)->item(0);
+            }
+            if (!$linkNode) continue;
+
+            $url = trim($linkNode->getAttribute('href'));
+            if (empty($url) || $url === '#') continue;
+
+            // Resolve to absolute URL
+            if (strpos($url, 'http') !== 0) {
+                $parsed = parse_url($baseUrl);
+                $url = ($parsed['scheme'] ?? 'https') . '://' . ($parsed['host'] ?? 'buyabans.com') . '/' . ltrim($url, '/');
+            }
+
+            // --- Price ---
+            // BuyAbans puts the selling price in span.selling-price.
+            // When a product is on sale there are TWO price spans (original + discounted);
+            // the last one is always the actual selling price.
+            $priceNodes = $xpath->query('.//*[contains(@class, "selling-price")]', $card);
+            $price      = null;
+
+            if ($priceNodes->length > 0) {
+                // Use the LAST span — on discounted items the last one is the sale price
+                $lastPriceNode = $priceNodes->item($priceNodes->length - 1);
+                $priceRaw      = trim($lastPriceNode->textContent);
+                $price         = (float) preg_replace('/[^0-9.]/', '', str_replace(',', '', $priceRaw));
+            }
+
+            // Fallback: regex scan of the raw card text for "Rs. X,XXX"
+            if (!$price) {
+                $cardText = $card->textContent;
+                if (preg_match_all('/Rs\.\s*([\d,]+(?:\.\d{2})?)/', $cardText, $pm)) {
+                    // Use the last matched price (same logic as above)
+                    $price = (float) str_replace(',', '', end($pm[1]));
+                }
+            }
+
+            if (!$price || $price <= 0) continue;
+
+            // --- Image ---
+            $imgNode = $xpath->query('.//*[contains(@class, "grid-product-img")] | .//img', $card)->item(0);
+            $imgUrl  = '';
+            if ($imgNode) {
+                $imgUrl = trim($imgNode->getAttribute('data-src') ?: $imgNode->getAttribute('src'));
+            }
+
+            // --- Stock status ---
+            $cardText    = strtolower($card->textContent);
+            $stockStatus = (strpos($cardText, 'out of stock') !== false) ? 'out_of_stock' : 'in_stock';
+
+            // --- SKU (product ID) ---
+            // BuyAbans puts data-product-id on the wishlist toggle button
+            $skuNode = $xpath->query('.//*[@data-product-id]', $card)->item(0);
+            $sku     = $skuNode ? trim($skuNode->getAttribute('data-product-id')) : null;
+
+            // --- Brand ---
+            $brand = null;
+            $knownBrands = ['Samsung', 'Apple', 'LG', 'Sony', 'Panasonic', 'Philips', 'Hisense',
+                            'Singer', 'Nokia', 'Xiaomi', 'Oppo', 'Vivo', 'Huawei', 'Haier', 'Midea',
+                            'Beko', 'Bosch', 'Sharp', 'TCL', 'Whirlpool', 'Electrolux', 'Motorola',
+                            'Realme', 'Infinix', 'Tecno', 'Itel', 'Lenovo', 'Honor'];
+
+            $nameLower = strtolower($name);
+            foreach ($knownBrands as $b) {
+                if (strpos($nameLower, strtolower($b)) !== false) {
+                    $brand = $b;
+                    break;
+                }
+            }
+
+            $items[] = [
+                'name'               => $name,
+                'product_url'        => $url,
+                'image_url'          => $imgUrl ?: null,
+                'price'              => $price,
+                'brand'              => $brand,
+                'model'              => null,
+                'stock_status'       => $stockStatus,
+                'source_product_key' => $sku ?: null,
+            ];
 
         }
 

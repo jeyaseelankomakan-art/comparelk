@@ -32,11 +32,16 @@ $msg = '';
 $error = '';
 
 $availableParsers = [
-    'GenericCategoryParser' => 'Generic (JSON-LD)',
-    'SingerParser'          => 'Singer Sri Lanka',
-    'DarazParser'           => 'Daraz.lk',
-    'BuyabansParser'        => 'Buyabans.com',
+    'GenericCategoryParser'  => 'Generic (JSON-LD)',
+    'KaprukaCategoryParser'  => 'Kapruka.com',
+    'SingerParser'           => 'Singer Sri Lanka',
+    'DarazParser'            => 'Daraz.lk',
+    'BuyabansParser'         => 'BuyAbans.com (buyabans.com)',
 ];
+
+// BuyAbans note: use the AJAX API URL directly for best results, e.g.:
+// https://buyabans.com/product-list?category_id=15&stamp_banner_id=0&sort=new_arrivals&is_search_list=false
+// category_id=15 → Mobile Phones
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!csrf_verify()) {

@@ -193,18 +193,38 @@ function scrapeProductStoreLink(PDO $pdo, array $link): array {
         return $result;
     }
 
-    $context = stream_context_create([
-        'http' => [
-            'timeout'         => 15,
-            'user_agent'      => 'compare.lk/1.0 (Price comparison; auto-scraper)',
-            'follow_location' => 1,
-        ],
-        'ssl' => ['verify_peer' => false, 'verify_peer_name' => false],
+    // Reset the PHP execution timer for each individual URL so one slow page
+    // cannot exhaust the global max_execution_time for the entire scraper run.
+    set_time_limit(60);
+
+    // Use cURL instead of file_get_contents — stream context 'timeout' is unreliable
+    // on Windows/WAMP and can allow a stalled connection to hang indefinitely.
+    // CURLOPT_CONNECTTIMEOUT and CURLOPT_TIMEOUT are honoured rock-solidly.
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_MAXREDIRS      => 5,
+        CURLOPT_CONNECTTIMEOUT => 8,   // abort if we can't connect within 8 s
+        CURLOPT_TIMEOUT        => 20,  // abort the whole transfer after 20 s
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false,
+        CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        CURLOPT_ENCODING       => '',  // handle gzip/deflate automatically
     ]);
 
-    $html = @file_get_contents($url, false, $context);
-    if ($html === false) {
-        $result['message'] = 'Fetch failed';
+    $html     = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlErr  = curl_error($ch);
+    curl_close($ch);
+
+    if ($html === false || !empty($curlErr)) {
+        $result['message'] = 'Fetch failed: ' . $curlErr;
+        return $result;
+    }
+
+    if ($httpCode >= 400) {
+        $result['message'] = "HTTP $httpCode";
         return $result;
     }
 
