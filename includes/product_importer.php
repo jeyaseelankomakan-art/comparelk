@@ -718,16 +718,14 @@ class SingerParser implements CategoryParserInterface {
             $codeNode = $xpath->query('.//p[contains(@class, "product__code")]', $card)->item(0);
             $sku      = $codeNode ? trim($codeNode->nodeValue) : null;
 
-            // Singer shows prices as "Rs 45,000" — pick up the first match
+            // Singer shows prices as "Rs. 541,099" — note the dot after Rs
             $cardText = $card->nodeValue;
-            preg_match_all('/Rs\s+([\d,]+(?:\.\d{2})?)/', $cardText, $priceMatches);
+            preg_match_all('/Rs\.?\s*([\d,]+(?:\.\d{2})?)/i', $cardText, $priceMatches);
 
             $price = null;
 
             if (!empty($priceMatches[1])) {
-
                 $price = str_replace(',', '', $priceMatches[1][0]);
-
             }
 
             if (!$price || (float)$price <= 0) continue;
@@ -790,59 +788,93 @@ class DarazParser implements CategoryParserInterface {
 
         $items = [];
 
-        // Pattern 1: Daraz sometimes puts a "listItems" array directly in the page JS
+        // Strategy 1: Daraz category pages are React SPAs — no products are in the initial HTML.
+        // Hit their internal REST search/browse API directly to get JSON product data.
+        $items = $this->fetchViaApi($baseUrl);
+        if (!empty($items)) return $items;
+
+        // Strategy 2: Older Daraz pages embedded a "listItems" array directly in page JS
         if (preg_match('/\"listItems\"\s*:\s*(\[.*?\])\s*[,}]/s', $html, $m)) {
-
             $listData = json_decode($m[1], true);
-
             if (is_array($listData)) {
-
                 foreach ($listData as $prod) {
-
                     $item = $this->extractDarazProduct($prod, $baseUrl);
-
                     if ($item) $items[] = $item;
-
                 }
-
             }
-
         }
 
-        // Pattern 2: Newer Daraz pages use window.pageData — try that if pattern 1 found nothing
+        // Strategy 3: Some Daraz page versions use window.pageData
         if (empty($items) && preg_match('/window\.pageData\s*=\s*(\{.*?\});\s*<\/script>/s', $html, $m)) {
-
             $pageData = json_decode($m[1], true);
-
             if (is_array($pageData)) {
-
                 $listItems = $pageData['mods']['listItems'] ?? [];
-
                 foreach ($listItems as $prod) {
-
                     $item = $this->extractDarazProduct($prod, $baseUrl);
-
                     if ($item) $items[] = $item;
-
                 }
-
             }
-
         }
 
-        // Neither pattern worked — try the generic JSON-LD approach as a last resort
+        // Strategy 4: Last resort — generic JSON-LD
         if (empty($items)) {
-
             $generic = new GenericCategoryParser();
             $items = $generic->parseHtml($html, $baseUrl);
-
         }
 
         return $items;
-
     }
 
-    // Map a raw Daraz product object (from their JS data) to our standard item format.
+    // Fetch products from Daraz's internal browse/search REST API.
+    // Their category pages are full React SPAs so cURL of the HTML page yields no product data.
+    private function fetchViaApi(string $categoryUrl): array {
+        $items = [];
+
+        // Extract URL key: https://www.daraz.lk/smartphones/ -> smartphones
+        $path = trim(parse_url($categoryUrl, PHP_URL_PATH) ?? '', '/');
+        if (empty($path)) return [];
+
+        $apiUrl = 'https://www.daraz.lk/rest/search?q=&mod=ajax&options[urlKey]=' . urlencode($path) . '&page=1&limit=40';
+
+        $ch = curl_init($apiUrl);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_TIMEOUT        => 20,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_HTTPHEADER     => [
+                'Accept: application/json, text/javascript, */*; q=0.01',
+                'X-Requested-With: XMLHttpRequest',
+                'Referer: ' . $categoryUrl,
+            ],
+            CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36',
+        ]);
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if (!$response || $httpCode !== 200) return [];
+
+        $data = json_decode($response, true);
+        if (!is_array($data)) return [];
+
+        // The API returns items in different locations depending on API version
+        $listItems = $data['mods']['listItems']
+                  ?? $data['listItems']
+                  ?? $data['result']['resultList']
+                  ?? $data['data']['resultList']
+                  ?? [];
+
+        foreach ($listItems as $prod) {
+            if (isset($prod['item'])) $prod = $prod['item'];
+            $item = $this->extractDarazProduct($prod, $categoryUrl);
+            if ($item) $items[] = $item;
+        }
+
+        return $items;
+    }
+
+    // Map a raw Daraz product object to our standard item format.
     // Field names vary between API versions, so we check several alternatives for each.
     private function extractDarazProduct(array $prod, string $baseUrl): ?array {
 
@@ -854,39 +886,28 @@ class DarazParser implements CategoryParserInterface {
 
         if (!$name || !$price) return null;
 
-        // Strip any currency symbols or commas from the price string
         if (is_string($price)) {
-
             $price = preg_replace('/[^0-9.]/', '', str_replace(',', '', $price));
-
         }
 
         $price = (float) $price;
-
         if ($price <= 0) return null;
 
-        // Fix relative URLs — Daraz sometimes gives paths without the domain
         if ($url && strpos($url, '//') !== 0 && strpos($url, 'http') !== 0) {
-
             $parsed = parse_url($baseUrl);
             $url = ($parsed['scheme'] ?? 'https') . '://' . ($parsed['host'] ?? 'www.daraz.lk') . '/' . ltrim($url, '/');
-
         }
 
         if (!$url) return null;
 
         $stockStatus = 'in_stock';
-
         if (isset($prod['inStock']) && !$prod['inStock']) {
-
             $stockStatus = 'out_of_stock';
-
         }
 
         $brand = $prod['brandName'] ?? $prod['brand'] ?? null;
 
         return [
-
             'name'               => $name,
             'product_url'        => $url,
             'image_url'          => $img,
@@ -895,12 +916,11 @@ class DarazParser implements CategoryParserInterface {
             'model'              => null,
             'stock_status'       => $stockStatus,
             'source_product_key' => $sku ? (string) $sku : null,
-
         ];
-
     }
 
 }
+
 
 // BuyAbans (buyabans.com) loads products via an AJAX JSON endpoint rather than embedding
 // them in the page HTML. When the category page loads, JavaScript calls:
@@ -984,12 +1004,7 @@ class BuyabansParser implements CategoryParserInterface {
     // -------------------------------------------------------------------------
     private function extractCategoryId(string $html, string $baseUrl): ?int {
 
-        // Pattern 1: JS variable like  category_id: 15  or  "category_id":15
-        if (preg_match('/"?category_id"?\s*:\s*(\d+)/i', $html, $m)) {
-            return (int) $m[1];
-        }
-
-        // Pattern 2: URL query param  ?category_id=15  (when admin enters the API URL directly)
+        // Pattern 1: URL query param ?category_id=15 (direct API URL from admin)
         $parsedUrl = parse_url($baseUrl);
         if (!empty($parsedUrl['query'])) {
             parse_str($parsedUrl['query'], $qp);
@@ -998,9 +1013,39 @@ class BuyabansParser implements CategoryParserInterface {
             }
         }
 
-        // Pattern 3: data attribute  data-category="15"
+        // Pattern 2: JS variable like  category_id: 15  or  "category_id":15
+        if (preg_match('/"?category_id"?\s*[=:,]\s*(\d+)/i', $html, $m)) {
+            return (int) $m[1];
+        }
+
+        // Pattern 3: data attribute  data-category-id="15"
         if (preg_match('/data-category[_-]?id\s*=\s*["\']?(\d+)/i', $html, $m)) {
             return (int) $m[1];
+        }
+
+        // Pattern 4: Slug-based fallback — map known BuyAbans category slugs to IDs
+        // Source: https://buyabans.com/product-list?category_id=X
+        $path = strtolower(trim($parsedUrl['path'] ?? '', '/'));
+        $slugMap = [
+            'smart-phones'         => 15,
+            'mobile-phones'        => 15,
+            'phones'               => 15,
+            'televisions'          => 2,
+            'tv'                   => 2,
+            'laptops'              => 7,
+            'refrigerators'        => 5,
+            'washing-machines'     => 6,
+            'air-conditioners'     => 4,
+            'audio'                => 19,
+            'earphones'            => 20,
+            'headphones'           => 20,
+            'cameras'              => 8,
+            'tablets'              => 16,
+        ];
+        foreach ($slugMap as $slug => $id) {
+            if (str_contains($path, $slug)) {
+                return $id;
+            }
         }
 
         return null;
