@@ -72,8 +72,9 @@ function extractPriceFromHtml(string $html): ?float {
         }
     }
     if (!empty($jsonLdCandidates)) {
-        // Largest value wins: product prices are always greater than coupon/offer amounts.
-        return max($jsonLdCandidates);
+        // Lowest value wins: JSON-LD typically lists the current selling price as the
+        // lowest 'price' entry (the higher values are original/was-prices or delivery costs).
+        return min($jsonLdCandidates);
     }
 
     // ── Strategy 2: OpenGraph / meta price tags ───────────────────────────────

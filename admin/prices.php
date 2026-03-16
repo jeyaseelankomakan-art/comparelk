@@ -26,7 +26,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_price_id'])) {
 $adminTitle = 'Price Management';
 require_once __DIR__ . '/header.php';
 
-$pdo = getDB();
 $msg = '';
 $error = '';
 $productId = (int) ($_GET['product_id'] ?? 0);

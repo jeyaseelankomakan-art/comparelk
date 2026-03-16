@@ -983,109 +983,110 @@ class BuyabansParser implements CategoryParserInterface {
 
         $dom = new DOMDocument();
         @$dom->loadHTML('<?xml encoding="utf-8"?>' . $html, LIBXML_NOERROR | LIBXML_NOWARNING);
-        $xpath = new DOMXPath($dom);
+$xpath = new DOMXPath($dom);
 
-        // Each BuyAbans product card sits inside div.product-list-item
-        $cards = $xpath->query('//*[contains(@class, "product-list-item")]');
+// Each BuyAbans product card sits inside div.product-list-item
+$cards = $xpath->query('//*[contains(@class, "product-list-item")]');
 
-        foreach ($cards as $card) {
+foreach ($cards as $card) {
 
-            // --- Name ---
-            $nameNode = $xpath->query('.//*[contains(@class, "pro-name-compact")]', $card)->item(0);
-            if (!$nameNode) continue;
+// --- Name ---
+$nameNode = $xpath->query('.//*[contains(@class, "pro-name-compact")]', $card)->item(0);
+if (!$nameNode) continue;
 
-            // Prefer the title attribute (never truncated) over textContent
-            $name = trim($nameNode->getAttribute('title') ?: $nameNode->textContent);
-            if (empty($name)) continue;
+// Prefer the title attribute (never truncated) over textContent
+$name = trim($nameNode->getAttribute('title') ?: $nameNode->textContent);
+if (empty($name)) continue;
 
-            // --- Product URL ---
-            // The image anchor is the most reliable link — it always points to the product page
-            $linkNode = $xpath->query('.//*[contains(@class, "product-imgage")]//a[@href] | .//a[contains(@href, "buyabans.com") or starts-with(@href, "/")]', $card)->item(0);
-            if (!$linkNode) {
-                $linkNode = $xpath->query('.//a[@href]', $card)->item(0);
-            }
-            if (!$linkNode) continue;
+// --- Product URL ---
+// The image anchor is the most reliable link — it always points to the product page
+$linkNode = $xpath->query('.//*[contains(@class, "product-imgage")]//a[@href] | .//a[contains(@href, "buyabans.com") or
+starts-with(@href, "/")]', $card)->item(0);
+if (!$linkNode) {
+$linkNode = $xpath->query('.//a[@href]', $card)->item(0);
+}
+if (!$linkNode) continue;
 
-            $url = trim($linkNode->getAttribute('href'));
-            if (empty($url) || $url === '#') continue;
+$url = trim($linkNode->getAttribute('href'));
+if (empty($url) || $url === '#') continue;
 
-            // Resolve to absolute URL
-            if (strpos($url, 'http') !== 0) {
-                $parsed = parse_url($baseUrl);
-                $url = ($parsed['scheme'] ?? 'https') . '://' . ($parsed['host'] ?? 'buyabans.com') . '/' . ltrim($url, '/');
-            }
+// Resolve to absolute URL
+if (strpos($url, 'http') !== 0) {
+$parsed = parse_url($baseUrl);
+$url = ($parsed['scheme'] ?? 'https') . '://' . ($parsed['host'] ?? 'buyabans.com') . '/' . ltrim($url, '/');
+}
 
-            // --- Price ---
-            // BuyAbans puts the selling price in span.selling-price.
-            // When a product is on sale there are TWO price spans (original + discounted);
-            // the last one is always the actual selling price.
-            $priceNodes = $xpath->query('.//*[contains(@class, "selling-price")]', $card);
-            $price      = null;
+// --- Price ---
+// BuyAbans puts the selling price in span.selling-price.
+// When a product is on sale there are TWO price spans (original + discounted);
+// the last one is always the actual selling price.
+$priceNodes = $xpath->query('.//*[contains(@class, "selling-price")]', $card);
+$price = null;
 
-            if ($priceNodes->length > 0) {
-                // Use the LAST span — on discounted items the last one is the sale price
-                $lastPriceNode = $priceNodes->item($priceNodes->length - 1);
-                $priceRaw      = trim($lastPriceNode->textContent);
-                $price         = (float) preg_replace('/[^0-9.]/', '', str_replace(',', '', $priceRaw));
-            }
+if ($priceNodes->length > 0) {
+// Use the LAST span — on discounted items the last one is the sale price
+$lastPriceNode = $priceNodes->item($priceNodes->length - 1);
+$priceRaw = trim($lastPriceNode->textContent);
+$price = (float) preg_replace('/[^0-9.]/', '', str_replace(',', '', $priceRaw));
+}
 
-            // Fallback: regex scan of the raw card text for "Rs. X,XXX"
-            if (!$price) {
-                $cardText = $card->textContent;
-                if (preg_match_all('/Rs\.\s*([\d,]+(?:\.\d{2})?)/', $cardText, $pm)) {
-                    // Use the last matched price (same logic as above)
-                    $price = (float) str_replace(',', '', end($pm[1]));
-                }
-            }
+// Fallback: regex scan of the raw card text for "Rs. X,XXX"
+if (!$price) {
+$cardText = $card->textContent;
+if (preg_match_all('/Rs\.\s*([\d,]+(?:\.\d{2})?)/', $cardText, $pm)) {
+// Use the last matched price (same logic as above)
+$price = (float) str_replace(',', '', end($pm[1]));
+}
+}
 
-            if (!$price || $price <= 0) continue;
+if (!$price || $price <= 0) continue;
 
             // --- Image ---
             $imgNode = $xpath->query('.//*[contains(@class, "grid-product-img")] | .//img', $card)->item(0);
-            $imgUrl  = '';
+            $imgUrl = '';
             if ($imgNode) {
                 $imgUrl = trim($imgNode->getAttribute('data-src') ?: $imgNode->getAttribute('src'));
             }
 
-            // --- Stock status ---
-            $cardText    = strtolower($card->textContent);
-            $stockStatus = (strpos($cardText, 'out of stock') !== false) ? 'out_of_stock' : 'in_stock';
+    // --- Stock status ---
+    $cardText = strtolower($card->textContent);
+    $stockStatus = (strpos($cardText, 'out of stock') !== false) ? 'out_of_stock' : 'in_stock';
 
-            // --- SKU (product ID) ---
-            // BuyAbans puts data-product-id on the wishlist toggle button
-            $skuNode = $xpath->query('.//*[@data-product-id]', $card)->item(0);
-            $sku     = $skuNode ? trim($skuNode->getAttribute('data-product-id')) : null;
+    // --- SKU (product ID) ---
+    // BuyAbans puts data-product-id on the wishlist toggle button
+    $skuNode = $xpath->query('.//*[@data-product-id]', $card)->item(0);
+    $sku = $skuNode ? trim($skuNode->getAttribute('data-product-id')) : null;
 
-            // --- Brand ---
-            $brand = null;
-            $knownBrands = ['Samsung', 'Apple', 'LG', 'Sony', 'Panasonic', 'Philips', 'Hisense',
-                            'Singer', 'Nokia', 'Xiaomi', 'Oppo', 'Vivo', 'Huawei', 'Haier', 'Midea',
-                            'Beko', 'Bosch', 'Sharp', 'TCL', 'Whirlpool', 'Electrolux', 'Motorola',
-                            'Realme', 'Infinix', 'Tecno', 'Itel', 'Lenovo', 'Honor'];
+    // --- Brand ---
+    $brand = null;
+    $knownBrands = ['Samsung', 'Apple', 'LG', 'Sony', 'Panasonic', 'Philips', 'Hisense',
+    'Singer', 'Nokia', 'Xiaomi', 'Oppo', 'Vivo', 'Huawei', 'Haier', 'Midea',
+    'Beko', 'Bosch', 'Sharp', 'TCL', 'Whirlpool', 'Electrolux', 'Motorola',
+    'Realme', 'Infinix', 'Tecno', 'Itel', 'Lenovo', 'Honor'];
 
-            $nameLower = strtolower($name);
-            foreach ($knownBrands as $b) {
-                if (strpos($nameLower, strtolower($b)) !== false) {
-                    $brand = $b;
-                    break;
-                }
-            }
+    $nameLower = strtolower($name);
+    foreach ($knownBrands as $b) {
+    if (strpos($nameLower, strtolower($b)) !== false) {
+    $brand = $b;
+    break;
+    }
+    }
 
-            $items[] = [
-                'name'               => $name,
-                'product_url'        => $url,
-                'image_url'          => $imgUrl ?: null,
-                'price'              => $price,
-                'brand'              => $brand,
-                'model'              => null,
-                'stock_status'       => $stockStatus,
-                'source_product_key' => $sku ?: null,
-            ];
-
-        }
-
-        return $items;
+    $items[] = [
+    'name' => $name,
+    'product_url' => $url,
+    'image_url' => $imgUrl ?: null,
+    'price' => $price,
+    'brand' => $brand,
+    'model' => null,
+    'stock_status' => $stockStatus,
+    'source_product_key' => $sku ?: null,
+    ];
 
     }
 
-}
+    return $items;
+
+    }
+
+    }

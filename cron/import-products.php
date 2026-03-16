@@ -46,7 +46,11 @@ $pdo->exec("
 
         target_category_id INT UNSIGNED DEFAULT NULL,
 
+        enabled TINYINT(1) NOT NULL DEFAULT 1,
+
         last_run DATETIME DEFAULT NULL,
+
+        last_result TEXT DEFAULT NULL,
 
         FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE CASCADE
 
@@ -54,8 +58,11 @@ $pdo->exec("
 
 ");
 
-$log = [];
+// Add missing columns to existing tables (safe to run even if columns already exist)
+try { $pdo->exec("ALTER TABLE store_import_urls ADD COLUMN enabled TINYINT(1) NOT NULL DEFAULT 1"); } catch (PDOException $e) { /* column already exists */ }
+try { $pdo->exec("ALTER TABLE store_import_urls ADD COLUMN last_result TEXT DEFAULT NULL"); } catch (PDOException $e) { /* column already exists */ }
 
+$log = [];
 $log[] = '[' . date('Y-m-d H:i:s') . '] Importer started.';
 
 $stmt = $pdo->query("SELECT * FROM store_import_urls WHERE enabled = 1 ORDER BY last_run ASC LIMIT 10");

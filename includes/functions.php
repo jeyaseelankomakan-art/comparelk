@@ -70,10 +70,11 @@ function getCategoryBySlug(string $slug): ?array
 /**
  * Get products by category
  */
-function getProductsByCategory(int $categoryId, string $sort = 'latest'): array
+function getProductsByCategory(int $categoryId, string $sort = 'latest', int $limit = 0): array
 {
     $pdo = getDB();
     $orderBy = $sort === 'price' ? 'min_price ASC' : 'p.created_at DESC, p.id DESC';
+    $limitSql = $limit > 0 ? 'LIMIT ' . (int)$limit : '';
     $stmt = $pdo->prepare("
         SELECT p.*,
                MIN(pp.price) AS min_price,
@@ -84,6 +85,7 @@ function getProductsByCategory(int $categoryId, string $sort = 'latest'): array
         WHERE p.category_id = ?
         GROUP BY p.id
         ORDER BY $orderBy
+        $limitSql
     ");
     $stmt->execute([$categoryId]);
     return $stmt->fetchAll();
@@ -163,7 +165,12 @@ function searchProducts(string $keyword, ?int $categoryId = null, ?float $minPri
         $params[] = $maxPrice;
     }
 
-    $orderBy = $sort === 'price' ? 'min_price ASC' : 'p.created_at DESC, p.id DESC';
+    $orderBy = match ($sort) {
+        'price_asc' => 'min_price ASC',
+        'relevance' => 'p.created_at DESC, p.id DESC', // Default to latest for relevance
+        'latest' => 'p.created_at DESC, p.id DESC',
+        default => 'p.created_at DESC, p.id DESC', // Default to latest
+    };
     $having = count($havingClauses) ? 'HAVING ' . implode(' AND ', $havingClauses) : '';
 
     $sql = "
@@ -202,7 +209,7 @@ function getLatestProducts(int $limit = 8): array
         LEFT JOIN product_prices pp ON p.id = pp.product_id
         LEFT JOIN categories c ON p.category_id = c.id
         GROUP BY p.id
-        ORDER BY last_updated DESC
+        ORDER BY COALESCE(MAX(pp.last_updated), p.created_at) DESC
         LIMIT {$limit}
     ");
     return $stmt->fetchAll();

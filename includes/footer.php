@@ -36,14 +36,17 @@ $footerHasLogo = file_exists($footerLogoPath);
             <div class="col-lg-2 col-md-4">
                 <h6 class="footer-heading"><?= e(t('footer_categories')) ?></h6>
                 <div class="footer-categories-scroll">
-                    <ul class="footer-links">
-                        <?php foreach ($categories as $cat): ?>
-                            <li><a href="<?= url('category.php?slug=' . urlencode($cat['slug'])) ?>">
-                                    <i class="bi <?= e($cat['icon']) ?> me-1"></i><?= e($cat['name']) ?>
-                                </a></li>
-                        <?php endforeach; ?>
-                    </ul>
-                </div>
+                <ul class="footer-links">
+                    <?php
+                    // $categories may not be set on all pages — re-fetch if needed
+                    $footerCategories = isset($categories) ? $categories : getCategories();
+                    foreach ($footerCategories as $cat): ?>
+                        <li><a href="<?= url('category.php?slug=' . urlencode($cat['slug'])) ?>">
+                                <i class="bi <?= e($cat['icon']) ?> me-1"></i><?= e($cat['name']) ?>
+                            </a></li>
+                    <?php endforeach; ?>
+                </ul>
+            </div>
             </div>
             <div class="col-lg-2 col-md-4">
                 <h6 class="footer-heading"><?= e(t('footer_quick_links')) ?></h6>

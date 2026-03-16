@@ -275,9 +275,9 @@ require_once 'includes/header.php';
 
     <!-- Related Products -->
     <?php
-    $related = getProductsByCategory($product['category_id'], 'latest');
-    $related = array_filter($related, fn($r) => $r['id'] != $id);
-    $related = array_slice(array_values($related), 0, 4);
+    $related = getProductsByCategory($product['category_id'], 'latest', 5);
+    $related = array_values(array_filter($related, fn($r) => $r['id'] != $id));
+    $related = array_slice($related, 0, 4);
     if (!empty($related)):
         ?>
         <div class="mt-5">

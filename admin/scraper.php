@@ -116,18 +116,28 @@ if ($fetchUrl !== '') {
     if (!preg_match('#^https?://#i', $fetchUrl)) {
         $error = 'Please enter a valid URL (e.g. https://www.daraz.lk/...).';
     } else {
-        $context = stream_context_create([
-            'http' => [
-                'timeout' => 15,
-                'user_agent' => 'compare.lk/1.0 (Admin fetch preview)',
-                'follow_location' => 1,
-            ],
-            'ssl' => ['verify_peer' => false, 'verify_peer_name' => false],
+        // Use cURL with hard timeouts — file_get_contents() stream context 'timeout'
+        // is unreliable on Windows/WAMP and can freeze the admin page for 120 s.
+        set_time_limit(30);
+        $ch = curl_init($fetchUrl);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS      => 5,
+            CURLOPT_CONNECTTIMEOUT => 8,
+            CURLOPT_TIMEOUT        => 15,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => false,
+            CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            CURLOPT_ENCODING       => '',
         ]);
+        $html     = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlErr  = curl_error($ch);
+        curl_close($ch);
 
-        $html = @file_get_contents($fetchUrl, false, $context);
-        if ($html === false) {
-            $error = 'Fetch failed. The site may block requests or require JavaScript.';
+        if ($html === false || !empty($curlErr) || $httpCode >= 400) {
+            $error = 'Fetch failed' . (!empty($curlErr) ? ': ' . $curlErr : " (HTTP $httpCode)") . '. The site may block requests or require JavaScript.';
         } else {
             $title = null;
             if (preg_match('/<title[^>]*>(.*?)<\\/title>/is', $html, $m)) {
