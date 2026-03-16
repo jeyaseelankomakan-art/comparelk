@@ -47,13 +47,13 @@ function extractBrandFromTitle(string $title): ?string {
 // We try several matching strategies in order of reliability:
 //   1. Exact URL match (most reliable — same URL = definitely the same product)
 //   2. Store + source product key (e.g. SKU from the original site)
-//   3. Product name match (risky but usually fine for our dataset)
-//   4. Model number match (helpful for electronics)
+//   3. Exact Model number match (helpful for electronics)
+//   4. Fuzzy Name match (breaks title into keywords and compares overlap)
 function findExistingProductMatch(PDO $pdo, array $scrapedItem): ?int {
 
     $url = $scrapedItem['product_url'];
 
-    // Check if we've seen this exact product URL before
+    // 1. Check if we've seen this exact product URL before
     $stmt = $pdo->prepare("SELECT product_id FROM product_store_links WHERE product_url = ? LIMIT 1");
     $stmt->execute([$url]);
     $urlMatch = $stmt->fetchColumn();
@@ -62,9 +62,8 @@ function findExistingProductMatch(PDO $pdo, array $scrapedItem): ?int {
         return (int) $urlMatch;
     }
 
-    // Try matching by the store's own product ID / SKU if we captured one
+    // 2. Try matching by the store's own product ID / SKU if we captured one
     if (!empty($scrapedItem['source_product_key'])) {
-
         $stmt = $pdo->prepare("SELECT id FROM products WHERE source_store_id = ? AND source_product_key = ? LIMIT 1");
         $stmt->execute([$scrapedItem['store_id'], $scrapedItem['source_product_key']]);
         $keyMatch = $stmt->fetchColumn();
@@ -72,21 +71,10 @@ function findExistingProductMatch(PDO $pdo, array $scrapedItem): ?int {
         if ($keyMatch) {
             return (int) $keyMatch;
         }
-
     }
 
-    // Fall back to name matching — this catches slight URL differences for the same product
-    $stmt = $pdo->prepare("SELECT id FROM products WHERE name = ? LIMIT 1");
-    $stmt->execute([$scrapedItem['name']]);
-    $nameMatch = $stmt->fetchColumn();
-
-    if ($nameMatch) {
-        return (int) $nameMatch;
-    }
-
-    // Last resort: match by model number if we have one
+    // 3. Match by exact model number if we have one
     if (!empty($scrapedItem['model'])) {
-
          $stmt = $pdo->prepare("SELECT id FROM products WHERE model = ? LIMIT 1");
          $stmt->execute([$scrapedItem['model']]);
          $modelMatch = $stmt->fetchColumn();
@@ -94,10 +82,56 @@ function findExistingProductMatch(PDO $pdo, array $scrapedItem): ?int {
          if ($modelMatch) {
              return (int) $modelMatch;
          }
-
     }
 
-    // Nothing matched — treat this as a brand new product
+    // 4. Fuzzy / Fuzzy-Keyword name matching (solves slight name variations across stores)
+    // E.g. "Apple iPhone 13 128GB" vs "iPhone 13 (128GB)"
+    $normalizedIncoming = normalizeProductName($scrapedItem['name']);
+    $incomingWords = array_filter(explode(' ', $normalizedIncoming), fn($word) => strlen($word) > 1);
+
+    if (count($incomingWords) > 0) {
+        // Fetch recent products to compare against (limit to 1000 to keep it fast)
+        // We only compare if at least one key word matches to speed up the loop
+        $firstWord = array_values($incomingWords)[0];
+        
+        $stmt = $pdo->prepare("SELECT id, name FROM products WHERE name LIKE ? ORDER BY id DESC LIMIT 1000");
+        $stmt->execute(["%{$firstWord}%"]);
+        $candidates = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $bestMatchId = null;
+        $bestScore = 0;
+
+        foreach ($candidates as $cand) {
+            $normalizedCand = normalizeProductName($cand['name']);
+            $candWords = array_filter(explode(' ', $normalizedCand), fn($word) => strlen($word) > 1);
+
+            // Calculate Jaccard Similarity (Word intersection / Word union)
+            $intersection = array_intersect($incomingWords, $candWords);
+            $union = array_unique(array_merge($incomingWords, $candWords));
+
+            if (count($union) === 0) continue;
+
+            $score = count($intersection) / count($union);
+
+            // If it's a very close match, bump the score
+            if (strpos($normalizedCand, $normalizedIncoming) !== false || strpos($normalizedIncoming, $normalizedCand) !== false) {
+                // One string is fully contained in another (e.g. "iPhone 13" is inside "Apple iPhone 13")
+                $score += 0.2; 
+            }
+
+            if ($score > $bestScore) {
+                $bestScore = $score;
+                $bestMatchId = $cand['id'];
+            }
+        }
+
+        // If the similarity score is above 65%, consider it the same product
+        if ($bestScore >= 0.65 && $bestMatchId) {
+            return (int) $bestMatchId;
+        }
+    }
+
+    // Nothing matched closely enough — treat this as a brand new product
     return null;
 
 }
@@ -239,38 +273,44 @@ function queueScrapedProduct(PDO $pdo, array $item): void {
 }
 
 // Download a product image from a URL and save it to the uploads folder.
+// Uses cURL with enforced timeouts — file_get_contents() is unreliable on Windows/WAMP.
 // Returns just the filename so we can store it in the DB, or null if anything fails.
 function downloadAndSaveImage(string $url): ?string {
 
     if (empty($url)) return null;
 
-    $context = stream_context_create([
-
-        'http' => ['timeout' => 15, 'user_agent' => 'compare.lk /1.0 (Price comparison)'],
-
-        // Disable SSL verification — some stores use self-signed certs
-        'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]
-
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_CONNECTTIMEOUT => 8,
+        CURLOPT_TIMEOUT        => 15,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false,
+        CURLOPT_USERAGENT      => 'compare.lk/1.0 (Price comparison)',
+        CURLOPT_ENCODING       => '',
     ]);
-
-    $imageBytes = @file_get_contents($url, false, $context);
+    $imageBytes = curl_exec($ch);
+    curl_close($ch);
 
     if (!$imageBytes) return null;
 
     // Use finfo to check the actual MIME type, not just the file extension
     $finfo = new finfo(FILEINFO_MIME_TYPE);
-    $mime = $finfo->buffer($imageBytes);
+    $mime  = $finfo->buffer($imageBytes);
 
-    $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'];
+    $allowed = [
+        'image/jpeg' => 'jpg',
+        'image/png'  => 'png',
+        'image/gif'  => 'gif',
+        'image/webp' => 'webp',
+    ];
 
     // Reject anything that isn't a recognised image format
     if (!isset($allowed[$mime])) return null;
 
-    $ext = $allowed[$mime];
-
-    // Use a unique prefix so filenames never collide
+    $ext      = $allowed[$mime];
     $filename = uniqid('prod_auto_') . '.' . $ext;
-
     $uploadDir = __DIR__ . '/../uploads/products/';
 
     if (!is_dir($uploadDir)) mkdir($uploadDir, 0755, true);
@@ -278,14 +318,13 @@ function downloadAndSaveImage(string $url): ?string {
     $dest = $uploadDir . $filename;
 
     if (file_put_contents($dest, $imageBytes)) {
-
         return $filename;
-
     }
 
     return null;
 
 }
+
 
 // Fetch a store category page and extract all the products from it.
 // This is the main function called by both the admin "Run now" button
