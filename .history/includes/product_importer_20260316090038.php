@@ -412,18 +412,9 @@ class GenericCategoryParser implements CategoryParserInterface {
 
             foreach ($graph as $obj) {
 
-                // @type can be a plain string OR an array of types (e.g. on Kapruka).
-                // Normalise it to a single lowercase string before comparing.
-                $rawType = $obj['@type'] ?? null;
-                if (is_array($rawType)) {
-                    // Use the first entry that is actually a string
-                    $rawType = implode(' ', array_filter($rawType, 'is_string'));
-                }
-                $type = strtolower((string) $rawType);
+                if (isset($obj['@type']) && (strtolower($obj['@type']) === 'product' || strtolower($obj['@type']) === 'itemlist')) {
 
-                if ($type === 'product' || $type === 'itemlist') {
-
-                    if ($type === 'itemlist' && isset($obj['itemListElement'])) {
+                    if (strtolower($obj['@type']) === 'itemlist' && isset($obj['itemListElement'])) {
 
                         // ItemList wraps each product inside itemListElement.item
                          foreach ($obj['itemListElement'] as $element) {
@@ -440,7 +431,7 @@ class GenericCategoryParser implements CategoryParserInterface {
 
                          }
 
-                    } else if ($type === 'product') {
+                    } else if (strtolower($obj['@type']) === 'product') {
 
                         // Single product — this shows up on product detail pages
                          $item = $this->extractProductFromJson($obj, $baseUrl);
