@@ -49,6 +49,22 @@ function ensureScraperTables(PDO $pdo): void {
  */
 function extractPriceFromHtml(string $html): ?float {
 
+    // ── Strategy 0: Store-specific "Main Price" containers ───────────────────
+    // Softlogic: <div class="main-price">...LKR 574,999.00</h3>
+    if (preg_match('/id="product-promotion-price"[^>]*>\s*(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
+        return (float) str_replace(',', '', $m[1]);
+    }
+    if (preg_match('/id="product-price"[^>]*>\s*(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
+        return (float) str_replace(',', '', $m[1]);
+    }
+    if (preg_match('/class="main-price"[^>]*>.*? (?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
+        return (float) str_replace(',', '', $m[1]);
+    }
+    // Singer: often has class "price" or "special-price"
+    if (preg_match('/class="special-price"[^>]*>.*? (?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
+        return (float) str_replace(',', '', $m[1]);
+    }
+
     // ── Strategy 1: JSON-LD "price" (most reliable) ───────────────────────────
     //
     // Collect EVERY "price" occurrence in JSON-LD / JSON objects, then return
@@ -117,22 +133,50 @@ function extractPriceFromHtml(string $html): ?float {
 
     // ── Strategy 5: Rs./LKR text prices ──────────────────────────────────────
     // Use a threshold of 1 000 to skip delivery fees, coupon amounts, etc.
-    if (preg_match_all('/\b(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/i', $html, $matches)) {
+    //
+    // IMPORTANT: Many Sri Lankan store pages (especially BuyAbans) include bank
+    // installment plan eligibility text like "Easy payment plans from Sampath Bank
+    // apply to transactions over Rs 10,000". These Rs. amounts repeat once per bank
+    // and can outnumber the actual product price on the page. We filter them out by
+    // checking the surrounding context for installment/bank-related keywords.
+    if (preg_match_all('/\b(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/i', $html, $matches, PREG_OFFSET_CAPTURE)) {
         $candidates = [];
-        foreach ($matches[1] as $raw) {
-            $num = (float) str_replace([',', ' '], '', $raw);
-            if ($num > 1000) {
-                $candidates[] = $num;
+        // Keywords that indicate a price is part of bank/installment/BNPL plan text
+        $installmentKeywords = [
+            'payment plan', 'installment', 'transactions over', 'transactions between',
+            'transactions from', 'emi', 'monthly', 'per month', 'easy payment',
+            'applies to', 'apply to', 'eligible for', 'koko', 'buy now pay later',
+            'split into', 'pay in',
+        ];
+        foreach ($matches[1] as $match) {
+            $raw    = $match[0];
+            $offset = $match[1];
+            $num    = (float) str_replace([',', ' '], '', $raw);
+            if ($num <= 1000) continue;
+
+            // Grab ~200 chars before this match to check for installment-related context
+            $contextStart  = max(0, $offset - 200);
+            $contextBefore = strtolower(substr($html, $contextStart, $offset - $contextStart));
+            // Also decode HTML entities in the context (BuyAbans encodes its JS strings)
+            $contextBefore = html_entity_decode($contextBefore, ENT_QUOTES, 'UTF-8');
+
+            $isInstallment = false;
+            foreach ($installmentKeywords as $kw) {
+                if (strpos($contextBefore, $kw) !== false) {
+                    $isInstallment = true;
+                    break;
+                }
             }
+            if ($isInstallment) continue;
+
+            $candidates[] = $num;
         }
         if (!empty($candidates)) {
-            $freq     = array_count_values(array_map('strval', $candidates));
-            arsort($freq);
-            $topFreq  = reset($freq);
-            if ($topFreq > 1) {
-                return (float) array_key_first($freq);
-            }
-            return max($candidates);
+            // Use the FIRST candidate — on Sri Lankan product pages the current selling
+            // price always appears at the top, before repeated strikethrough/was prices.
+            // The frequency heuristic is unreliable because the original price often
+            // appears multiple times (price display, meta tags, structured data).
+            return $candidates[0];
         }
     }
 
@@ -144,6 +188,16 @@ function extractPriceFromHtml(string $html): ?float {
  * Returns price as float or null if not found.
  */
 function extractOriginalPriceFromHtml(string $html, float $actualPrice): ?float {
+    // Softlogic specific was-price
+    if (preg_match('/class="[^"]*discounted-price[^"]*"[^>]*>\s*(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
+        $val = (float) str_replace(',', '', $m[1]);
+        if ($val > $actualPrice) return $val;
+    }
+    if (preg_match('/class="main-price-del"[^>]*>.*? (?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
+        $val = (float) str_replace(',', '', $m[1]);
+        if ($val > $actualPrice) return $val;
+    }
+
     // JSON-LD: look for "originalPrice", "regularPrice", "listPrice", "fullPrice"
     $keys = ['originalPrice', 'regularPrice', 'listPrice', 'fullPrice', 'compareAtPrice', 'mrp_price'];
     foreach ($keys as $key) {
@@ -157,7 +211,7 @@ function extractOriginalPriceFromHtml(string $html, float $actualPrice): ?float 
     if (preg_match_all('/"price"\s*:\s*"?([\d.]+)"?/', $html, $m)) {
         $prices = array_map('floatval', $m[1]);
         $prices = array_filter($prices, fn($v) => $v > $actualPrice);
-        if (!empty($prices)) return max($prices);
+        if (!empty($prices)) return min($prices);
     }
 
     // HTML strikethrough patterns: <del>, <s>, .was-price, .original-price etc.
@@ -173,6 +227,49 @@ function extractOriginalPriceFromHtml(string $html, float $actualPrice): ?float 
     if (preg_match('/(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)[^<]*<\/[^>]+>\s*[^<]*class=["\'][^"\']*(?:origin|original|old|was|del|strike|crossed|mrp)[^"\']*["\']/i', $html, $m)) {
         $val = (float) str_replace(',', '', $m[1]);
         if ($val > $actualPrice) return $val;
+    }
+
+    // ── Fallback: Rs. text scan ─────────────────────────────────────────────
+    // BuyAbans and similar sites show the original/was-price as Rs. X,XXX near
+    // the sale price but use HTML-entity-encoded markup inside JS rather than
+    // standard <del> tags. Scan all Rs. amounts, filter out installment/bank
+    // plan amounts, and pick the smallest value above the sale price.
+    if (preg_match_all('/\b(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/i', $html, $matches, PREG_OFFSET_CAPTURE)) {
+        $installmentKeywords = [
+            'payment plan', 'installment', 'transactions over', 'transactions between',
+            'transactions from', 'emi', 'monthly', 'per month', 'easy payment',
+            'applies to', 'apply to', 'eligible for', 'koko', 'buy now pay later',
+            'split into', 'pay in',
+        ];
+        $wasCandidates = [];
+        foreach ($matches[1] as $match) {
+            $raw    = $match[0];
+            $offset = $match[1];
+            $num    = (float) str_replace([',', ' '], '', $raw);
+
+            // Only interested in amounts higher than the actual sale price
+            if ($num <= $actualPrice) continue;
+
+            // Filter out installment/bank plan threshold amounts
+            $contextStart  = max(0, $offset - 200);
+            $contextBefore = strtolower(substr($html, $contextStart, $offset - $contextStart));
+            $contextBefore = html_entity_decode($contextBefore, ENT_QUOTES, 'UTF-8');
+
+            $isInstallment = false;
+            foreach ($installmentKeywords as $kw) {
+                if (strpos($contextBefore, $kw) !== false) {
+                    $isInstallment = true;
+                    break;
+                }
+            }
+            if ($isInstallment) continue;
+
+            $wasCandidates[] = $num;
+        }
+        // Return the smallest value above sale price — that's the original/was price
+        if (!empty($wasCandidates)) {
+            return min($wasCandidates);
+        }
     }
 
     return null;
@@ -215,6 +312,32 @@ function scrapeProductStoreLink(PDO $pdo, array $link): array {
     ]);
 
     $html     = curl_exec($ch);
+
+    // ── Bypass: Softlogic / Zenedge BOT challenge ────────────────────────────
+    // If the HTML is very short and contains the __zjc cookie challenge
+    if (strlen($html) < 2000 && strpos($html, '__zjc') !== false && preg_match('/var\s+v\s*=\s*([\d.]+)\s*\*\s*([\d.]+);/', $html, $m)) {
+        $v1 = (float)$m[1];
+        $v2 = (float)$m[2];
+        $cookieVal = floor($v1 * $v2);
+        $cookieName = 'zjc_session';
+        if (preg_match('/__zjc(\d+)/', $html, $cm)) {
+            $cookieName = '__zjc' . $cm[1];
+        }
+
+        // Apply cookie and re-fetch. Zenedge often requires hitting root or "/" first
+        // to fully establish the session before the specific product URL works.
+        $cookieHeader = "Cookie: $cookieName=$cookieVal";
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [$cookieHeader]);
+        
+        // Initial "activation" hit
+        curl_setopt($ch, CURLOPT_URL, "https://mysoftlogic.lk/");
+        curl_exec($ch);
+        
+        // Final hit back to product URL
+        curl_setopt($ch, CURLOPT_URL, $url);
+        $html = curl_exec($ch);
+    }
+
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $curlErr  = curl_error($ch);
     curl_close($ch);
