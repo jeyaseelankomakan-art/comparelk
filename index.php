@@ -252,29 +252,29 @@ $stores = getStores();
             <div class="trust-item">
                 <div class="trust-icon" style="--ti:#F6A623"><i class="bi bi-shield-fill-check"></i></div>
                 <div>
-                    <div class="trust-title">Verified Prices</div>
-                    <div class="trust-desc">Checked from official store pages daily</div>
+                    <div class="trust-title"><?= e(t('trust_verified_prices')) ?></div>
+                    <div class="trust-desc"><?= e(t('trust_verified_desc')) ?></div>
                 </div>
             </div>
             <div class="trust-item">
                 <div class="trust-icon" style="--ti:#4285F4"><i class="bi bi-clock-fill"></i></div>
                 <div>
-                    <div class="trust-title">Real-Time Updates</div>
-                    <div class="trust-desc">Prices refreshed automatically</div>
+                    <div class="trust-title"><?= e(t('trust_realtime')) ?></div>
+                    <div class="trust-desc"><?= e(t('trust_realtime_desc')) ?></div>
                 </div>
             </div>
             <div class="trust-item">
                 <div class="trust-icon" style="--ti:#00C853"><i class="bi bi-graph-down-arrow"></i></div>
                 <div>
-                    <div class="trust-title">Price History</div>
-                    <div class="trust-desc">Track trends & find the best time to buy</div>
+                    <div class="trust-title"><?= e(t('trust_history')) ?></div>
+                    <div class="trust-desc"><?= e(t('trust_history_desc')) ?></div>
                 </div>
             </div>
             <div class="trust-item">
                 <div class="trust-icon" style="--ti:#9C27B0"><i class="bi bi-geo-alt-fill"></i></div>
                 <div>
-                    <div class="trust-title">Sri Lanka Only</div>
-                    <div class="trust-desc">Prices exclusively from local stores</div>
+                    <div class="trust-title"><?= e(t('trust_local')) ?></div>
+                    <div class="trust-desc"><?= e(t('trust_local_desc')) ?></div>
                 </div>
             </div>
         </div>
@@ -286,7 +286,7 @@ $stores = getStores();
     <div class="container">
         <div class="text-center mb-4">
             <div class="section-eyebrow"><?= e(t('prices_from_stores')) ?></div>
-            <h2 class="section-title">Trusted Sri Lankan Stores</h2>
+            <h2 class="section-title"><?= e(t('trusted_stores')) ?></h2>
         </div>
         <div class="stores-row">
             <?php foreach ($stores as $store): ?>
@@ -311,7 +311,7 @@ $stores = getStores();
         <div class="cta-card">
             <div class="cta-glow"></div>
             <div class="cta-content">
-                <div class="cta-eyebrow">Save More, Shop Smarter</div>
+                <div class="cta-eyebrow"><?= e(t('save_more_shop_smarter')) ?></div>
                 <h2 class="cta-title">
                     <?= e(t('cta_title')) ?>
                     <span class="cta-title-accent"><?= e(t('cta_title_2')) ?></span>
@@ -322,7 +322,7 @@ $stores = getStores();
                         <i class="bi bi-search me-2"></i><?= e(t('start_comparing')) ?>
                     </a>
                     <a href="<?= url('category.php?slug=electronics') ?>" class="btn btn-cta-secondary">
-                        <i class="bi bi-grid me-2"></i>Browse Categories
+                        <i class="bi bi-grid me-2"></i><?= e(t('browse_categories')) ?>
                     </a>
                 </div>
             </div>
