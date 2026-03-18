@@ -49,19 +49,37 @@ function ensureScraperTables(PDO $pdo): void {
  */
 function extractPriceFromHtml(string $html): ?float {
 
-    // ── Strategy 0: Store-specific "Main Price" containers ───────────────────
-    // Softlogic: <div class="main-price">...LKR 574,999.00</h3>
+    // ── Strategy 0: Store-specific Exact Selectors ─────────────────────────────
+    
+    // Daraz: pdp-price or pdt_price JS variable
+    if (preg_match('/"pdt_price"\s*:\s*"([\d,]+(?:\.\d{1,2})?)"/is', $html, $m)) {
+        return (float) str_replace(',', '', $m[1]);
+    }
+    if (preg_match('/class="[^"]*pdp-price_type_normal[^"]*"[^>]*>\s*(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/i', $html, $m)) {
+        return (float) str_replace(',', '', $m[1]);
+    }
+
+    // Softlogic: main-price OR discounted-price
+    if (preg_match('/class="[^"]*discounted-price[^"]*"[^>]*>\s*(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/i', $html, $m)) {
+        return (float) str_replace(',', '', $m[1]);
+    }
     if (preg_match('/id="product-promotion-price"[^>]*>\s*(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
         return (float) str_replace(',', '', $m[1]);
     }
     if (preg_match('/id="product-price"[^>]*>\s*(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
         return (float) str_replace(',', '', $m[1]);
     }
-    if (preg_match('/class="main-price"[^>]*>.*? (?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
+    if (preg_match('/class="main-price"[^>]*>.*?(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
         return (float) str_replace(',', '', $m[1]);
     }
-    // Singer: often has class "price" or "special-price"
-    if (preg_match('/class="special-price"[^>]*>.*? (?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
+
+    // Singer: special-price
+    if (preg_match('/class="special-price"[^>]*>.*?(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
+        return (float) str_replace(',', '', $m[1]);
+    }
+    
+    // BuyAbans: sale-price or just price (excluding was-price)
+    if (preg_match('/class="[^"]*(?:sale-price|current-price)[^"]*"[^>]*>\s*(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/i', $html, $m)) {
         return (float) str_replace(',', '', $m[1]);
     }
 
@@ -118,16 +136,16 @@ function extractPriceFromHtml(string $html): ?float {
 
     // ── Strategy 4: Generic JS/JSON "price" key ───────────────────────────────
     // Broader pattern that catches single-quoted keys and inline JS objects.
-    if (preg_match_all('/["\']price["\']\s*:\s*["\']?([\d,]+(?:\.\d{1,2})?)["\']?/i', $html, $matches)) {
+    if (preg_match_all('/["\'](?:price|salePrice|sellingPrice)["\']\s*:\s*["\']?([\d,]+(?:\.\d{1,2})?)["\']?/i', $html, $matches)) {
         $candidates = array_map(fn($v) => (float) str_replace(',', '', $v), $matches[1]);
         $candidates = array_filter($candidates, fn($v) => $v > 100);
         if (!empty($candidates)) {
-            // Most-frequent price wins (product price usually appears several times)
+            // Most-frequent price wins, BUT if we only have 1 occurrence, assume MIN price is the current price (not max)
             $freq = array_count_values(array_map('strval', $candidates));
             arsort($freq);
             $topFreq = reset($freq);
             $topVal  = (float) array_key_first($freq);
-            return ($topFreq > 1) ? $topVal : max($candidates);
+            return ($topFreq > 1) ? $topVal : min($candidates);
         }
     }
 
@@ -188,12 +206,31 @@ function extractPriceFromHtml(string $html): ?float {
  * Returns price as float or null if not found.
  */
 function extractOriginalPriceFromHtml(string $html, float $actualPrice): ?float {
-    // Softlogic specific was-price
-    if (preg_match('/class="[^"]*discounted-price[^"]*"[^>]*>\s*(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
+    // Store-specific Exact Selectors
+    // Daraz: old-price or originalPrice JSON
+    if (preg_match('/"originalPrice"\s*:\s*"([\d,]+(?:\.\d{1,2})?)"/is', $html, $m)) {
         $val = (float) str_replace(',', '', $m[1]);
         if ($val > $actualPrice) return $val;
     }
-    if (preg_match('/class="main-price-del"[^>]*>.*? (?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
+    if (preg_match('/class="[^"]*pdp-price_type_deleted[^"]*"[^>]*>\s*(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/i', $html, $m)) {
+        $val = (float) str_replace(',', '', $m[1]);
+        if ($val > $actualPrice) return $val;
+    }
+
+    // Softlogic: main-price-del
+    if (preg_match('/class="main-price-del"[^>]*>.*?(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
+        $val = (float) str_replace(',', '', $m[1]);
+        if ($val > $actualPrice) return $val;
+    }
+    
+    // Singer: old-price
+    if (preg_match('/class="old-price"[^>]*>.*?(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
+        $val = (float) str_replace(',', '', $m[1]);
+        if ($val > $actualPrice) return $val;
+    }
+
+    // BuyAbans: was-price
+    if (preg_match('/class="was-price"[^>]*>.*?(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
         $val = (float) str_replace(',', '', $m[1]);
         if ($val > $actualPrice) return $val;
     }

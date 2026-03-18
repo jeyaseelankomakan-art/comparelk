@@ -10,16 +10,19 @@ requireAdminLogin();
 
 $pdo = getDB();
 
-// Handle delete price BEFORE any output (requires redirect)
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_price_id'])) {
-    if (csrf_verify()) {
-        $delId = (int) $_POST['delete_price_id'];
-        $delPid = (int) ($_POST['back_product_id'] ?? 0);
-        $pdo->prepare("DELETE FROM product_prices WHERE id=?")->execute([$delId]);
-        if ($delPid) {
-            header('Location: ' . url('admin/prices.php') . '?product_id=' . $delPid . '&deleted=1');
-            exit;
-        }
+// Handle delete via plain POST form (debugging version)
+if (isset($_POST['delete_price_id'])) {
+    if (hash_equals(csrf_token(), $_POST['token'] ?? '')) {
+        $delId  = (int) $_POST['delete_price_id'];
+        $delPid = (int) ($_POST['product_id'] ?? 0);
+        
+        $stmt = $pdo->prepare("DELETE FROM product_prices WHERE id=?");
+        $stmt->execute([$delId]);
+        
+        header('Location: ' . url('admin/prices.php') . '?product_id=' . $delPid . '&deleted=1');
+        exit;
+    } else {
+        die("<h1>CSRF Token Mismatch</h1><p>Expected: " . csrf_token() . "</p><p>Got: " . ($_POST['token'] ?? 'none') . "</p>");
     }
 }
 
@@ -87,16 +90,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['price'])) {
     }
 }
 
-// Delete price fallback (no redirect needed — already handled before header.php for redirect cases)
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_price_id']) && empty($_POST['back_product_id'])) {
-    if (!csrf_verify()) {
-        $error = 'Security check failed.';
-    } else {
-        $delId = (int) $_POST['delete_price_id'];
-        $pdo->prepare("DELETE FROM product_prices WHERE id=?")->execute([$delId]);
-        $msg = 'Price entry removed.';
-    }
-}
+// Backwards compatibility placeholder
 
 // Selected product
 $selectedProduct = null;
@@ -270,12 +264,11 @@ $allStores = $pdo->query("SELECT * FROM stores ORDER BY name")->fetchAll();
                                 <td>
                                     <a href="<?= url('admin/prices.php?edit_price=' . $cp['id']) ?>"
                                         class="btn btn-icon btn-outline-primary me-1"><i class="bi bi-pencil"></i></a>
-                                    <form method="post" action="<?= url('admin/prices.php') ?>" class="d-inline"
-                                          onsubmit="return confirm('Remove this price entry?')">
-                                        <?= csrf_field() ?>
+                                    <form method="POST" action="<?= url('admin/prices.php') ?>" class="d-inline">
+                                        <input type="hidden" name="token" value="<?= csrf_token() ?>">
                                         <input type="hidden" name="delete_price_id" value="<?= $cp['id'] ?>">
-                                        <input type="hidden" name="back_product_id" value="<?= $productId ?>">
-                                        <button type="submit" class="btn btn-icon btn-outline-danger">
+                                        <input type="hidden" name="product_id" value="<?= $productId ?>">
+                                        <button type="submit" class="btn btn-icon btn-outline-danger" title="Delete price">
                                             <i class="bi bi-trash"></i>
                                         </button>
                                     </form>
@@ -350,12 +343,8 @@ $allStores = $pdo->query("SELECT * FROM stores ORDER BY name")->fetchAll();
 </div>
 
 <style>
-    .fw-600 {
-        font-weight: 600;
-    }
-
-    .fw-700 {
-        font-weight: 700;
-    }
+    .fw-600 { font-weight: 600; }
+    .fw-700 { font-weight: 700; }
 </style>
+
 <?php require_once __DIR__ . '/footer.php'; ?>

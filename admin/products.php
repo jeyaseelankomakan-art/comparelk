@@ -61,6 +61,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_product_id']) 
     }
 }
 
+// Auto-Merge Duplicates
+if ($action === 'merge_duplicates') {
+    if (!isset($_GET['token']) || !hash_equals(csrf_token(), $_GET['token'])) {
+        $error = "Security check failed.";
+    } else {
+        $dups = $pdo->query("SELECT LOWER(TRIM(name)) AS norm_name, COUNT(*) AS c FROM products GROUP BY norm_name HAVING c > 1")->fetchAll();
+        $mergedCount = 0;
+        foreach ($dups as $dup) {
+            $norm = $dup['norm_name'];
+            $prods = $pdo->prepare("SELECT id FROM products WHERE LOWER(TRIM(name)) = ? ORDER BY id ASC");
+            $prods->execute([$norm]);
+            $list = $prods->fetchAll(PDO::FETCH_COLUMN);
+            
+            $primaryId = array_shift($list); // The oldest product is kept
+            
+            foreach ($list as $dupId) {
+                // Move prices to primary product (ignore constraints)
+                $pdo->prepare("UPDATE IGNORE product_prices SET product_id = ? WHERE product_id = ?")->execute([$primaryId, $dupId]);
+                $pdo->prepare("DELETE FROM product_prices WHERE product_id = ?")->execute([$dupId]);
+                
+                // Move store links to primary product
+                $pdo->prepare("UPDATE IGNORE product_store_links SET product_id = ? WHERE product_id = ?")->execute([$primaryId, $dupId]);
+                $pdo->prepare("DELETE FROM product_store_links WHERE product_id = ?")->execute([$dupId]);
+                
+                // Delete the duplicate product entirely
+                $pdo->prepare("DELETE FROM products WHERE id = ?")->execute([$dupId]);
+                $mergedCount++;
+            }
+        }
+        if ($mergedCount > 0) {
+            $msg = "Successfully merged $mergedCount duplicate product(s)!";
+        } else {
+            $msg = "No duplicate products found to merge.";
+        }
+        $action = 'list';
+    }
+}
+
 $editProduct = null;
 if (($action === 'edit' || $action === 'add') && isset($_GET['id'])) {
     $stmt = $pdo->prepare("SELECT * FROM products WHERE id=?");
@@ -181,9 +219,16 @@ $products = $pdo->query("
     <!-- Products List -->
     <div class="d-flex align-items-center justify-content-between mb-3">
         <span class="text-muted"><?= count($products) ?> products total</span>
-        <a href="<?= url('admin/products.php?action=add') ?>" class="btn btn-primary">
-            <i class="bi bi-plus-circle me-1"></i>Add Product
-        </a>
+        <div class="d-flex gap-2">
+            <a href="<?= url('admin/products.php?action=merge_duplicates&token=' . csrf_token()) ?>" 
+               class="btn btn-warning"
+               onclick="return confirm('This will permanently merge all identical product duplicate entries together (keeping the oldest entry). Proceed?')">
+                <i class="bi bi-intersect me-1"></i>Auto Merge Duplicates
+            </a>
+            <a href="<?= url('admin/products.php?action=add') ?>" class="btn btn-primary">
+                <i class="bi bi-plus-circle me-1"></i>Add Product
+            </a>
+        </div>
     </div>
 
     <div class="table-card">

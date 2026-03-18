@@ -47,25 +47,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ->execute([$enabled ? 1 : 0, $id]);
             $msg = 'Scraper link updated.';
         } elseif ($action === 'run_all') {
-            // Run an immediate scrape for all enabled links (same logic as cron)
-            $limit = 50;
-            $stmt = $pdo->query("
-            SELECT * FROM product_store_links
-            WHERE auto_enabled = 1
-            ORDER BY (last_scraped_at IS NULL) DESC, last_scraped_at ASC
-            LIMIT {$limit}
-        ");
-            $links = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            $ok = 0;
-            $fail = 0;
-            foreach ($links as $link) {
-                $res = scrapeProductStoreLink($pdo, $link);
-                if ($res['status'] === 'ok')
-                    $ok++;
-                else
-                    $fail++;
-            }
-            $msg = "Auto-scrape finished. Updated prices: {$ok}, issues: {$fail}.";
+            // run_all is now handled client-side via AJAX (see JS below)
+            // This branch is kept for backwards-compat but should not be reached.
+            $msg = 'Please use the Run All button on the page (AJAX mode).';
         } elseif ($action === 'quick_add_price') {
             // Quick-add price directly from the fetch result
             $productId = (int) ($_POST['product_id'] ?? 0);
@@ -407,7 +391,7 @@ $links = $linksStmt->fetchAll(PDO::FETCH_ASSOC);
                             $fetchHost = parse_url($fetchUrl, PHP_URL_HOST);
                             foreach ($allStores as $st):
                                 // Auto-match store by domain
-                                $storeHost = parse_url($st['website_url'] ?? '', PHP_URL_HOST);
+                                $storeHost = parse_url($st['website_url'] ?? $st['url'] ?? '', PHP_URL_HOST);
                                 $autoMatch = $fetchHost && $storeHost && (
                                     str_contains($fetchHost, str_replace('www.', '', $storeHost)) ||
                                     str_contains($storeHost, str_replace('www.', '', $fetchHost))
@@ -474,19 +458,25 @@ $links = $linksStmt->fetchAll(PDO::FETCH_ASSOC);
     <div class="scraper-col-right">
         <div class="form-card scraper-links-card">
 
-            <!-- Header + run button -->
-            <div class="form-card-header d-flex align-items-center justify-content-between">
+            <!-- Header + run button (AJAX-driven) -->
+            <div class="form-card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
                 <h6 class="mb-0"><i class="bi bi-link-45deg me-2 text-primary"></i>Auto-scrape links
                     <span class="badge bg-secondary ms-1" style="font-size:.7rem;"><?= count($links) ?></span>
                 </h6>
-                <form method="post" action="<?= url('admin/scraper.php') ?>" class="m-0"
-                      onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').innerHTML='<i class=\'bi bi-arrow-repeat spin me-1\'></i>Running…';">
-                    <?= csrf_field() ?>
-                    <input type="hidden" name="action" value="run_all">
-                    <button type="submit" class="btn btn-sm btn-outline-primary">
-                        <i class="bi bi-play-fill me-1"></i>Run all now
-                    </button>
-                </form>
+                <button id="btnRunAll" class="btn btn-sm btn-outline-primary" onclick="runAllAjax()">
+                    <i class="bi bi-play-fill me-1"></i>Run all now
+                </button>
+            </div>
+            <!-- Live progress UI (hidden until run starts) -->
+            <div id="scraperProgress" style="display:none;padding:.5rem 1rem;border-bottom:1px solid var(--admin-border,#e5e9f0);">
+                <div class="d-flex align-items-center justify-content-between mb-1">
+                    <small id="scraperStatus" class="text-muted">Initialising…</small>
+                    <small id="scraperCount" class="text-muted">0 / 0</small>
+                </div>
+                <div class="progress" style="height:6px;">
+                    <div id="scraperBar" class="progress-bar bg-primary" role="progressbar" style="width:0%"></div>
+                </div>
+                <div id="scraperLog" style="max-height:120px;overflow-y:auto;font-size:.72rem;margin-top:.4rem;"></div>
             </div>
 
             <div class="form-card-body">
@@ -610,5 +600,79 @@ $links = $linksStmt->fetchAll(PDO::FETCH_ASSOC);
     </div><!-- /right col -->
 
 </div><!-- /scraper-layout -->
+
+<script>
+// ── AJAX sequential scraper ────────────────────────────────────────────────
+// Fetches link IDs from the table, then calls /api/scrape-one.php one-by-one
+// so PHP never hits max_execution_time regardless of how many links exist.
+
+// Map of link id -> display label ("ProductName @ Store")
+const LINK_MAP = <?= json_encode(array_column(
+    array_map(fn($l) => [
+        'id'    => $l['id'],
+        'label' => trim(($l['brand'] ? $l['brand'] . ' ' : '') . $l['product_name']) . ' @ ' . $l['store_name'],
+    ], $links),
+    'label', 'id'
+)) ?>;
+const LINK_IDS   = Object.keys(LINK_MAP).map(Number);
+const CSRF_TOKEN = '<?= csrf_token() ?>';
+const SCRAPE_URL = '<?= url('api/scrape-one.php') ?>';
+
+async function runAllAjax() {
+    const btn      = document.getElementById('btnRunAll');
+    const progress = document.getElementById('scraperProgress');
+    const bar      = document.getElementById('scraperBar');
+    const status   = document.getElementById('scraperStatus');
+    const count    = document.getElementById('scraperCount');
+    const log      = document.getElementById('scraperLog');
+
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-arrow-repeat spin me-1"></i>Running…';
+    progress.style.display = '';
+    log.innerHTML = '';
+
+    const total = LINK_IDS.length;
+    let ok = 0, fail = 0;
+
+    for (let i = 0; i < total; i++) {
+        const id    = LINK_IDS[i];
+        const label = LINK_MAP[id] || `Link #${id}`;
+        count.textContent = `${i + 1} / ${total}`;
+        status.textContent = `Scraping: ${label}…`;
+        bar.style.width = `${Math.round((i / total) * 100)}%`;
+
+        try {
+            const body = new URLSearchParams({ id, _csrf: CSRF_TOKEN, action: 'run_one' });
+            const resp = await fetch(SCRAPE_URL, { method: 'POST', body });
+            const data = await resp.json();
+
+            const cls      = data.status === 'ok' ? 'text-success' : 'text-warning';
+            const priceStr = data.price ? ` — Rs ${Number(data.price).toLocaleString()}` : '';
+            log.innerHTML += `<div class="${cls}">${label}${priceStr} <span class="text-muted">${data.message || ''}</span></div>`;
+            log.scrollTop = log.scrollHeight;
+
+            if (data.status === 'ok') ok++; else fail++;
+        } catch (e) {
+            log.innerHTML += `<div class="text-danger">${label} — network error: ${e.message}</div>`;
+            fail++;
+        }
+
+        // Polite pause between requests (same as cron)
+        await new Promise(r => setTimeout(r, 300));
+    }
+
+    bar.style.width = '100%';
+    bar.classList.remove('bg-primary');
+    bar.classList.add(fail > 0 ? 'bg-warning' : 'bg-success');
+    status.textContent = `Done! ✅ ${ok} updated, ⚠️ ${fail} issues.`;
+    count.textContent  = `${total} / ${total}`;
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Run all now';
+
+    // Reload page after 2 s so table statuses refresh
+    setTimeout(() => location.reload(), 2000);
+}
+</script>
 
 <?php require_once __DIR__ . '/footer.php'; ?>
