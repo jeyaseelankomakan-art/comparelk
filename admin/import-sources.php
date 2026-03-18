@@ -37,6 +37,7 @@ $availableParsers = [
     'SingerParser'           => 'Singer Sri Lanka',
     'DarazParser'            => 'Daraz.lk',
     'BuyabansParser'         => 'BuyAbans.com (buyabans.com)',
+    'SoftlogicParser'        => 'Softlogic.lk',
 ];
 
 // BuyAbans note: use the AJAX API URL directly for best results, e.g.:

@@ -1174,3 +1174,48 @@ if (!$price || $price <= 0) continue;
     }
 
     }
+class SoftlogicParser implements CategoryParserInterface {
+    public function parseHtml(string $html, string $baseUrl): array {
+        $items = [];
+        $dom = new DOMDocument();
+        @$dom->loadHTML($html, LIBXML_NOERROR | LIBXML_NOWARNING);
+        $xpath = new DOMXPath($dom);
+        $cards = $xpath->query('//div[contains(@class, "item-box")]');
+        foreach ($cards as $card) {
+            $linkNode = $xpath->query('.//a', $card)->item(0);
+            if (!$linkNode) continue;
+            $url = trim($linkNode->getAttribute('href'));
+            if (empty($url)) continue;
+            if (strpos($url, 'http') !== 0) $url = 'https://www.softlogic.lk/' . ltrim($url, '/');
+            $imgNode = $xpath->query('.//img', $card)->item(0);
+            $imgUrl  = $imgNode ? trim($imgNode->getAttribute('src')) : '';
+            $nameNode = $xpath->query('.//h2[contains(@class, "product-title")]', $card)->item(0);
+            $name = $nameNode ? trim($nameNode->textContent) : ($imgNode ? trim($imgNode->getAttribute('alt')) : '');
+            if (empty($name)) continue;
+            $priceNode = $xpath->query('.//*[contains(@class, "discounted-price")] | .//*[contains(@class, "main-price")]', $card);
+            $price = 0;
+            foreach ($priceNode as $pn) {
+                $pt = trim($pn->textContent);
+                if (preg_match('/(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/i', $pt, $m)) {
+                    $price = (float) str_replace(',', '', $m[1]);
+                    break;
+                }
+            }
+            if ($price <= 0) continue;
+            $items[] = [
+                'name'               => $name,
+                'product_url'        => $url,
+                'image_url'          => $imgUrl,
+                'price'              => $price,
+                'brand'              => extractBrandFromTitle($name),
+                'stock_status'       => 'in_stock',
+                'source_product_key' => null,  
+            ];
+        }
+        if (empty($items)) {
+            $generic = new GenericCategoryParser();
+            return $generic->parseHtml($html, $baseUrl);
+        }
+        return $items;
+    }
+}
