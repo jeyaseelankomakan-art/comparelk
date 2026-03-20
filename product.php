@@ -264,7 +264,7 @@ require_once 'includes/header.php';
                 <script>
                     // Load Chart.js date adapter
                     const chartDataScript = document.createElement('script');
-                    chartDataScript.src = '<?= url('assets/vendor/chartjs-adapter-date-fns.bundle.min.js') ?>';
+                    chartDataScript.src = 'https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js';
                     document.head.appendChild(chartDataScript);
 
                     const chartData = <?= json_encode($chartData) ?>;

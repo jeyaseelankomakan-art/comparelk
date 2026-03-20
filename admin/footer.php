@@ -10,7 +10,7 @@ $currentFile = basename($_SERVER['PHP_SELF']);
 <?php endif; ?>
 </div><!-- /admin-wrapper -->
 
-<script src="<?= url('assets/vendor/bootstrap/js/bootstrap.bundle.min.js') ?>"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
     /* ── Toast auto show ── */
     document.querySelectorAll('.toast').forEach(t => new bootstrap.Toast(t, { delay: 3000 }).show());

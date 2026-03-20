@@ -31,9 +31,9 @@ $hasLogo = file_exists($logoPath);
         })();
     </script>
     <!-- Bootstrap 5 -->
-    <link href="<?= url('assets/vendor/bootstrap/css/bootstrap.min.css') ?>" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- Bootstrap Icons -->
-    <link rel="stylesheet" href="<?= url('assets/vendor/bootstrap-icons/font/bootstrap-icons.min.css') ?>">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <!-- Google Fonts -->
     <link rel="stylesheet" href="<?= url('assets/css/fonts.css') ?>">
     <!-- Custom CSS -->
