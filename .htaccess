@@ -3,3 +3,9 @@ RewriteEngine On
 # Redirect root about.php and contact.php to pages/ (if users manually navigate)
 RewriteRule ^about\.php$ pages/about.php [L,QSA]
 RewriteRule ^contact\.php$ pages/contact.php [L,QSA]
+
+# --- SECURITY RULES ---
+# Prevent public access to the .git folder, .env files, and other hidden dotfiles
+RewriteCond %{SCRIPT_FILENAME} -d [OR]
+RewriteCond %{SCRIPT_FILENAME} -f
+RewriteRule "(^|/)\." - [F,L]
