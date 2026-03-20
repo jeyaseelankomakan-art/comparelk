@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Admin Login - compare.lk
  */
@@ -6,6 +7,40 @@ if (session_status() === PHP_SESSION_NONE)
     session_start();
 require_once __DIR__ . '/../includes/functions.php';
 require_once __DIR__ . '/../includes/lang.php';
+
+function loginThrottleKey(string $username): string
+{
+    $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    return strtolower(trim($username)) . '|' . $ip;
+}
+
+function loginThrottleState(string $key): array
+{
+    $state = $_SESSION['admin_login_throttle'][$key] ?? [
+        'fails' => 0,
+        'lock_until' => 0,
+    ];
+    return [
+        'fails' => (int) ($state['fails'] ?? 0),
+        'lock_until' => (int) ($state['lock_until'] ?? 0),
+    ];
+}
+
+function loginThrottleFail(string $key): void
+{
+    $state = loginThrottleState($key);
+    $state['fails']++;
+    if ($state['fails'] >= 5) {
+        $state['fails'] = 0;
+        $state['lock_until'] = time() + 600;
+    }
+    $_SESSION['admin_login_throttle'][$key] = $state;
+}
+
+function loginThrottleSuccess(string $key): void
+{
+    unset($_SESSION['admin_login_throttle'][$key]);
+}
 
 // Already logged in
 if (isAdminLoggedIn())
@@ -18,9 +53,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $username = trim($_POST['username'] ?? '');
         $password = trim($_POST['password'] ?? '');
+        $throttleKey = loginThrottleKey($username);
+        $throttle = loginThrottleState($throttleKey);
 
         if (!$username || !$password) {
             $error = t('fill_all_fields');
+        } elseif ($throttle['lock_until'] > time()) {
+            $wait = $throttle['lock_until'] - time();
+            $error = 'Too many failed attempts. Try again in ' . $wait . ' seconds.';
         } else {
             $pdo = getDB();
             $stmt = $pdo->prepare("SELECT * FROM admins WHERE username = ? LIMIT 1");
@@ -28,11 +68,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $admin = $stmt->fetch();
 
             if ($admin && password_verify($password, $admin['password_hash'])) {
+                loginThrottleSuccess($throttleKey);
                 session_regenerate_id(true);
                 $_SESSION['admin_id'] = $admin['id'];
                 $_SESSION['admin_username'] = $admin['username'];
                 redirect(url('admin/dashboard.php'));
             } else {
+                loginThrottleFail($throttleKey);
                 $error = 'Invalid username or password.'; // Keep in English for security messages
             }
         }
@@ -123,15 +165,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             display: flex;
             align-items: center;
         }
-        .pwd-eye:hover { color: #F6A623; }
+
+        .pwd-eye:hover {
+            color: #F6A623;
+        }
+
         /* Keep border colour when the input inside is focused */
         .pwd-group:focus-within .pwd-eye {
             border-color: #F6A623;
         }
+
         .pwd-group:focus-within .form-control {
             border-color: #F6A623;
-            box-shadow: 0 0 0 3px rgba(246,166,35,.25);
+            box-shadow: 0 0 0 3px rgba(246, 166, 35, .25);
         }
+
         /* Remove the right-border-radius from the password input (eye sits next to it) */
         .pwd-group .form-control {
             border-radius: 0 !important;
@@ -205,12 +253,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </div>
     <script src="<?= url('assets/vendor/bootstrap/js/bootstrap.bundle.min.js') ?>"></script>
     <script>
-        (function () {
-            var btn  = document.getElementById('togglePwd');
-            var inp  = document.getElementById('loginPassword');
+        (function() {
+            var btn = document.getElementById('togglePwd');
+            var inp = document.getElementById('loginPassword');
             var icon = document.getElementById('eyeIcon');
             if (!btn) return;
-            btn.addEventListener('click', function () {
+            btn.addEventListener('click', function() {
                 var isPassword = inp.type === 'password';
                 inp.type = isPassword ? 'text' : 'password';
                 icon.className = isPassword ? 'bi bi-eye-slash' : 'bi bi-eye';

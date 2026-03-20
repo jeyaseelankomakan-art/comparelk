@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Admin Prices Management - compare.lk
  */
@@ -12,17 +13,18 @@ $pdo = getDB();
 
 // Handle delete via plain POST form (debugging version)
 if (isset($_POST['delete_price_id'])) {
-    if (hash_equals(csrf_token(), $_POST['token'] ?? '')) {
+    if (csrf_verify()) {
         $delId  = (int) $_POST['delete_price_id'];
         $delPid = (int) ($_POST['product_id'] ?? 0);
-        
+
         $stmt = $pdo->prepare("DELETE FROM product_prices WHERE id=?");
         $stmt->execute([$delId]);
-        
+
         header('Location: ' . url('admin/prices.php') . '?product_id=' . $delPid . '&deleted=1');
         exit;
     } else {
-        die("<h1>CSRF Token Mismatch</h1><p>Expected: " . csrf_token() . "</p><p>Got: " . ($_POST['token'] ?? 'none') . "</p>");
+        http_response_code(403);
+        die('Security check failed. Please refresh and try again.');
     }
 }
 
@@ -148,7 +150,7 @@ $allStores = $pdo->query("SELECT * FROM stores ORDER BY name")->fetchAll();
                     <div class="mb-3">
                         <label class="form-label">Product <span class="text-danger">*</span></label>
                         <select name="product_id" class="form-select" required
-                            <?= !$editPrice ? 'onchange="window.location=\''.url('admin/prices.php').'?product_id=\'+this.value"' : '' ?>>
+                            <?= !$editPrice ? 'onchange="window.location=\'' . url('admin/prices.php') . '?product_id=\'+this.value"' : '' ?>>
                             <option value="">Select product...</option>
                             <?php foreach ($allProducts as $p): ?>
                                 <option value="<?= $p['id'] ?>" <?= ($editPrice ? $editPrice['product_id'] : $productId) == $p['id'] ? 'selected' : '' ?>>
@@ -312,7 +314,7 @@ $allStores = $pdo->query("SELECT * FROM stores ORDER BY name")->fetchAll();
                             GROUP BY p.id ORDER BY p.name
                         ")->fetchAll();
                             foreach ($prods as $p):
-                                ?>
+                            ?>
                                 <tr>
                                     <td>
                                         <div class="fw-600"><?= e($p['name']) ?></div>
@@ -343,8 +345,13 @@ $allStores = $pdo->query("SELECT * FROM stores ORDER BY name")->fetchAll();
 </div>
 
 <style>
-    .fw-600 { font-weight: 600; }
-    .fw-700 { font-weight: 700; }
+    .fw-600 {
+        font-weight: 600;
+    }
+
+    .fw-700 {
+        font-weight: 700;
+    }
 </style>
 
 <?php require_once __DIR__ . '/footer.php'; ?>

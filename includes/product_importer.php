@@ -2,10 +2,33 @@
 
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/functions.php';
+require_once __DIR__ . '/http_client.php';
+
+/**
+ * Ensure import-source mapping table exists.
+ */
+function ensureImportSourcesTable(PDO $pdo): void
+{
+    $pdo->exec(" 
+        CREATE TABLE IF NOT EXISTS store_import_urls (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            store_id INT UNSIGNED NOT NULL,
+            category_url VARCHAR(500) NOT NULL,
+            parser_class VARCHAR(100) DEFAULT 'GenericCategoryParser',
+            target_category_id INT UNSIGNED DEFAULT NULL,
+            enabled TINYINT(1) NOT NULL DEFAULT 1,
+            last_run DATETIME DEFAULT NULL,
+            last_result TEXT DEFAULT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB
+    ");
+}
 
 // Strip punctuation and lowercase the name so we can compare products
 // across different stores without worrying about casing or symbols.
-function normalizeProductName(string $name): string {
+function normalizeProductName(string $name): string
+{
 
     $name = strtolower($name);
 
@@ -16,13 +39,13 @@ function normalizeProductName(string $name): string {
     $name = preg_replace('/\s+/', ' ', $name);
 
     return trim($name);
-
 }
 
 // Try to detect the brand from the product title.
 // Most stores don't provide a separate brand field, so we just check
 // if the name contains anything from our known brands list.
-function extractBrandFromTitle(string $title): ?string {
+function extractBrandFromTitle(string $title): ?string
+{
 
     $brands = ['Samsung', 'Apple', 'LG', 'Sony', 'Panasonic', 'Abans', 'Philips', 'Hisense', 'Singer', 'Nokia', 'Xiaomi', 'Oppo', 'Vivo', 'Huawei'];
 
@@ -33,14 +56,11 @@ function extractBrandFromTitle(string $title): ?string {
         if (strpos($titleLower, strtolower($brand)) !== false) {
 
             return $brand;
-
         }
-
     }
 
     // No match found; caller can decide what to do
     return null;
-
 }
 
 // Before creating a new product, check if we already have it in the database.
@@ -49,7 +69,8 @@ function extractBrandFromTitle(string $title): ?string {
 //   2. Store + source product key (e.g. SKU from the original site)
 //   3. Exact Model number match (helpful for electronics)
 //   4. Fuzzy Name match (breaks title into keywords and compares overlap)
-function findExistingProductMatch(PDO $pdo, array $scrapedItem): ?int {
+function findExistingProductMatch(PDO $pdo, array $scrapedItem): ?int
+{
 
     $url = $scrapedItem['product_url'];
 
@@ -75,13 +96,13 @@ function findExistingProductMatch(PDO $pdo, array $scrapedItem): ?int {
 
     // 3. Match by exact model number if we have one
     if (!empty($scrapedItem['model'])) {
-         $stmt = $pdo->prepare("SELECT id FROM products WHERE model = ? LIMIT 1");
-         $stmt->execute([$scrapedItem['model']]);
-         $modelMatch = $stmt->fetchColumn();
+        $stmt = $pdo->prepare("SELECT id FROM products WHERE model = ? LIMIT 1");
+        $stmt->execute([$scrapedItem['model']]);
+        $modelMatch = $stmt->fetchColumn();
 
-         if ($modelMatch) {
-             return (int) $modelMatch;
-         }
+        if ($modelMatch) {
+            return (int) $modelMatch;
+        }
     }
 
     // 4. Fuzzy / Fuzzy-Keyword name matching (solves slight name variations across stores)
@@ -93,7 +114,7 @@ function findExistingProductMatch(PDO $pdo, array $scrapedItem): ?int {
         // Fetch recent products to compare against (limit to 1000 to keep it fast)
         // We only compare if at least one key word matches to speed up the loop
         $firstWord = array_values($incomingWords)[0];
-        
+
         $stmt = $pdo->prepare("SELECT id, name FROM products WHERE name LIKE ? ORDER BY id DESC LIMIT 1000");
         $stmt->execute(["%{$firstWord}%"]);
         $candidates = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -116,7 +137,7 @@ function findExistingProductMatch(PDO $pdo, array $scrapedItem): ?int {
             // If it's a very close match, bump the score
             if (strpos($normalizedCand, $normalizedIncoming) !== false || strpos($normalizedIncoming, $normalizedCand) !== false) {
                 // One string is fully contained in another (e.g. "iPhone 13" is inside "Apple iPhone 13")
-                $score += 0.2; 
+                $score += 0.2;
             }
 
             if ($score > $bestScore) {
@@ -133,7 +154,6 @@ function findExistingProductMatch(PDO $pdo, array $scrapedItem): ?int {
 
     // Nothing matched closely enough — treat this as a brand new product
     return null;
-
 }
 
 // This is the main entry point for each scraped item.
@@ -141,7 +161,8 @@ function findExistingProductMatch(PDO $pdo, array $scrapedItem): ?int {
 //   a) Skip (already queued and still pending review)
 //   b) Update prices on an existing product we already know about
 //   c) Insert it as a brand new product directly
-function queueScrapedProduct(PDO $pdo, array $item): void {
+function queueScrapedProduct(PDO $pdo, array $item): void
+{
 
     $normalized_name = normalizeProductName($item['name']);
 
@@ -157,12 +178,10 @@ function queueScrapedProduct(PDO $pdo, array $item): void {
 
             $pdo->prepare("UPDATE scraped_products SET price = ?, scraped_at = NOW() WHERE id = ?")
                 ->execute([$item['price'], $existingStaged['id']]);
-
         }
 
         // Either way, nothing more to do for this item
         return;
-
     }
 
     // See if the product already exists in our main catalog
@@ -188,26 +207,21 @@ function queueScrapedProduct(PDO $pdo, array $item): void {
                 // Price already on record — just refresh it
                 $pdo->prepare("UPDATE product_prices SET price = ?, product_url = ?, last_updated = NOW() WHERE id = ?")
                     ->execute([$item['price'], $item['product_url'], $pRow['id']]);
-
             } else {
 
                 // First time we've seen this store selling this product
                 $pdo->prepare("INSERT INTO product_prices (product_id, store_id, price, product_url, stock_status, last_updated) VALUES (?, ?, ?, ?, ?, NOW())")
                     ->execute([$matchId, $item['store_id'], $item['price'], $item['product_url'], $item['stock_status'] ?? 'in_stock']);
-
             }
 
             $pdo->commit();
-
         } catch (Exception $e) {
 
             $pdo->rollBack();
             error_log("Failed to auto-update existing product prices: " . $e->getMessage());
-
         }
 
         return;
-
     } else {
 
         // Brand new product — insert it straight into the catalog
@@ -220,7 +234,6 @@ function queueScrapedProduct(PDO $pdo, array $item): void {
         if (!empty($item['image_url'])) {
 
             $imageFilename = downloadAndSaveImage($item['image_url']);
-
         }
 
         try {
@@ -260,40 +273,31 @@ function queueScrapedProduct(PDO $pdo, array $item): void {
                 ->execute([$newProductId, $item['store_id'], $item['price'], $item['product_url'], $item['stock_status'] ?? 'in_stock']);
 
             $pdo->commit();
-
         } catch (Exception $e) {
 
             $pdo->rollBack();
             error_log("Failed to auto-insert new product directly: " . $e->getMessage());
-
         }
-
     }
-
 }
 
 // Download a product image from a URL and save it to the uploads folder.
 // Uses cURL with enforced timeouts — file_get_contents() is unreliable on Windows/WAMP.
 // Returns just the filename so we can store it in the DB, or null if anything fails.
-function downloadAndSaveImage(string $url): ?string {
+function downloadAndSaveImage(string $url): ?string
+{
 
     if (empty($url)) return null;
 
-    $ch = curl_init($url);
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_CONNECTTIMEOUT => 8,
-        CURLOPT_TIMEOUT        => 15,
-        CURLOPT_SSL_VERIFYPEER => false,
-        CURLOPT_SSL_VERIFYHOST => false,
-        CURLOPT_USERAGENT      => 'compare.lk/1.0 (Price comparison)',
-        CURLOPT_ENCODING       => '',
+    $res = httpFetch($url, [
+        'timeout' => 15,
+        'connect_timeout' => 8,
+        'user_agent' => 'compare.lk/1.0 (Price comparison)',
+        'encoding' => '',
     ]);
-    $imageBytes = curl_exec($ch);
-    curl_close($ch);
+    $imageBytes = $res['body'];
 
-    if (!$imageBytes) return null;
+    if (!$res['ok'] || $imageBytes === '') return null;
 
     // Use finfo to check the actual MIME type, not just the file extension
     $finfo = new finfo(FILEINFO_MIME_TYPE);
@@ -322,7 +326,6 @@ function downloadAndSaveImage(string $url): ?string {
     }
 
     return null;
-
 }
 
 
@@ -330,22 +333,20 @@ function downloadAndSaveImage(string $url): ?string {
 // This is the main function called by both the admin "Run now" button
 // and the cron job. It uses cURL so we can send a proper browser User-Agent
 // — plain file_get_contents gets blocked by most stores.
-function scrapeCategoryPage(PDO $pdo, int $storeId, string $url, string $parserClass, ?int $categoryId = null): array {
+function scrapeCategoryPage(PDO $pdo, int $storeId, string $url, string $parserClass, ?int $categoryId = null): array
+{
 
     $result = ['status' => 'error', 'message' => '', 'processed_count' => 0];
 
-    // Use cURL with a real browser UA — many stores block requests without one
-    $ch = curl_init($url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-    curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 20);
-    $html = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
+    $fetch = httpFetch($url, [
+        'timeout' => 20,
+        'connect_timeout' => 8,
+        'encoding' => '',
+    ]);
+    $html = $fetch['body'];
+    $httpCode = $fetch['http_code'];
 
-    if ($html === false || $httpCode >= 400) {
+    if (!$fetch['ok']) {
         $result['message'] = "Could not fetch URL: $url (HTTP $httpCode)";
         return $result;
     }
@@ -353,9 +354,8 @@ function scrapeCategoryPage(PDO $pdo, int $storeId, string $url, string $parserC
     // Make sure the parser class actually exists before trying to use it
     if (!class_exists($parserClass)) {
 
-         $result['message'] = "Parser class $parserClass not found.";
-         return $result;
-
+        $result['message'] = "Parser class $parserClass not found.";
+        return $result;
     }
 
     $parser = new $parserClass();
@@ -363,9 +363,8 @@ function scrapeCategoryPage(PDO $pdo, int $storeId, string $url, string $parserC
 
     if (empty($items)) {
 
-         $result['message'] = "No items found on page.";
-         return $result;
-
+        $result['message'] = "No items found on page.";
+        return $result;
     }
 
     $processed = 0;
@@ -388,21 +387,17 @@ function scrapeCategoryPage(PDO $pdo, int $storeId, string $url, string $parserC
         // Try to fill in the brand if the parser didn't manage to get it
         if (empty($item['brand'])) {
 
-             $item['brand'] = extractBrandFromTitle($item['name']);
-
+            $item['brand'] = extractBrandFromTitle($item['name']);
         }
 
         try {
 
             queueScrapedProduct($pdo, $item);
             $processed++;
-
         } catch (Exception $e) {
 
             error_log("Queue error: " . $e->getMessage());
-
         }
-
     }
 
     $result['status']          = 'ok';
@@ -410,23 +405,24 @@ function scrapeCategoryPage(PDO $pdo, int $storeId, string $url, string $parserC
     $result['processed_count'] = $processed;
 
     return $result;
-
 }
 
 // All parser classes implement this interface so scrapeCategoryPage()
 // can call them the same way regardless of which store we're scraping.
-interface CategoryParserInterface {
+interface CategoryParserInterface
+{
 
     public function parseHtml(string $html, string $baseUrl): array;
-
 }
 
 // A best-effort parser that works on most stores supporting JSON-LD structured data.
 // It looks for <script type="application/ld+json"> blocks and pulls out
 // Product or ItemList objects. Works surprisingly well without needing site-specific logic.
-class GenericCategoryParser implements CategoryParserInterface {
+class GenericCategoryParser implements CategoryParserInterface
+{
 
-    public function parseHtml(string $html, string $baseUrl): array {
+    public function parseHtml(string $html, string $baseUrl): array
+    {
 
         $items = [];
 
@@ -465,42 +461,35 @@ class GenericCategoryParser implements CategoryParserInterface {
                     if ($type === 'itemlist' && isset($obj['itemListElement'])) {
 
                         // ItemList wraps each product inside itemListElement.item
-                         foreach ($obj['itemListElement'] as $element) {
+                        foreach ($obj['itemListElement'] as $element) {
 
-                             $prod = $element['item'] ?? null;
+                            $prod = $element['item'] ?? null;
 
-                             if($prod) {
+                            if ($prod) {
 
-                                 $item = $this->extractProductFromJson($prod, $baseUrl);
+                                $item = $this->extractProductFromJson($prod, $baseUrl);
 
-                                 if($item) $items[] = $item;
-
-                             }
-
-                         }
-
+                                if ($item) $items[] = $item;
+                            }
+                        }
                     } else if ($type === 'product') {
 
                         // Single product — this shows up on product detail pages
-                         $item = $this->extractProductFromJson($obj, $baseUrl);
+                        $item = $this->extractProductFromJson($obj, $baseUrl);
 
-                         if($item) $items[] = $item;
-
+                        if ($item) $items[] = $item;
                     }
-
                 }
-
             }
-
         }
 
         return $items;
-
     }
 
     // Pull out a clean product array from a JSON-LD Product object.
     // Returns null if required fields are missing so the caller can skip it.
-    private function extractProductFromJson(array $obj, string $baseUrl): ?array {
+    private function extractProductFromJson(array $obj, string $baseUrl): ?array
+    {
 
         $name = $obj['name'] ?? null;
         $url  = $obj['url']  ?? null;
@@ -515,9 +504,7 @@ class GenericCategoryParser implements CategoryParserInterface {
             if (is_array($img) && isset($img['url'])) {
 
                 $img = $img['url'];
-
             }
-
         }
 
         $price       = null;
@@ -532,11 +519,9 @@ class GenericCategoryParser implements CategoryParserInterface {
             if (is_array($raw) && !isset($raw['price']) && !isset($raw['lowPrice']) && isset($raw[0])) {
 
                 $offers = $raw[0];
-
             } else {
 
                 $offers = $raw;
-
             }
 
             $price = $offers['price'] ?? $offers['lowPrice'] ?? null;
@@ -544,9 +529,7 @@ class GenericCategoryParser implements CategoryParserInterface {
             if (isset($offers['availability'])) {
 
                 $stockStatus = stripos($offers['availability'], 'InStock') !== false ? 'in_stock' : 'out_of_stock';
-
             }
-
         }
 
         // Can't do anything useful without a name, URL, and price
@@ -557,12 +540,10 @@ class GenericCategoryParser implements CategoryParserInterface {
 
             $parsed = parse_url($baseUrl);
             $url = ($parsed['scheme'] ?? 'https') . ':' . $url;
-
         } elseif (strpos($url, '/') === 0) {
 
             $parsed = parse_url($baseUrl);
             $url = ($parsed['scheme'] ?? 'https') . '://' . ($parsed['host'] ?? '') . $url;
-
         }
 
         return [
@@ -575,18 +556,18 @@ class GenericCategoryParser implements CategoryParserInterface {
             'stock_status' => $stockStatus,
 
         ];
-
     }
-
 }
 
 // Kapruka doesn't use JSON-LD for their product listings — each product card is a plain
 // <a href="/buyonline/..."> tag containing an image, a name div, and a price span.
 // This parser walks the DOM to find those cards and extracts the fields we need.
 // The SKU is pulled from the /kid/ segment of the product URL, which is stable across scrape runs.
-class KaprukaCategoryParser implements CategoryParserInterface {
+class KaprukaCategoryParser implements CategoryParserInterface
+{
 
-    public function parseHtml(string $html, string $baseUrl): array {
+    public function parseHtml(string $html, string $baseUrl): array
+    {
 
         $items = [];
 
@@ -599,6 +580,7 @@ class KaprukaCategoryParser implements CategoryParserInterface {
         $cards = $xpath->query('//a[contains(@href, "/buyonline/")]');
 
         foreach ($cards as $card) {
+            if (!$card instanceof DOMElement) continue;
 
             $url = trim($card->getAttribute('href'));
 
@@ -613,7 +595,7 @@ class KaprukaCategoryParser implements CategoryParserInterface {
             // The product image is always the first <img> inside the card
             $imgNode = $xpath->query('.//img', $card)->item(0);
             $imgUrl  = '';
-            if ($imgNode) {
+            if ($imgNode instanceof DOMElement) {
                 // Prefer data-src (lazy-loaded) over the placeholder src
                 $imgUrl = $imgNode->getAttribute('data-src') ?: $imgNode->getAttribute('src');
                 $imgUrl = trim($imgUrl);
@@ -673,21 +655,20 @@ class KaprukaCategoryParser implements CategoryParserInterface {
                 'source_product_key' => $sku,
 
             ];
-
         }
 
         return $items;
-
     }
-
 }
 
 // Singer Sri Lanka uses a custom WooCommerce-ish theme with specific CSS classes.
 // The generic JSON-LD parser doesn't reliably pick up their category pages,
 // so this parser directly walks the DOM for their product card structure.
-class SingerParser implements CategoryParserInterface {
+class SingerParser implements CategoryParserInterface
+{
 
-    public function parseHtml(string $html, string $baseUrl): array {
+    public function parseHtml(string $html, string $baseUrl): array
+    {
 
         $items = [];
 
@@ -699,18 +680,19 @@ class SingerParser implements CategoryParserInterface {
         $cards = $xpath->query('//div[contains(@class, "productfilter")]');
 
         foreach ($cards as $card) {
+            if (!$card instanceof DOMElement) continue;
 
             // The product link always contains "/product/" in the href
             $linkNode = $xpath->query('.//a[contains(@href, "/product/")]', $card)->item(0);
 
-            if (!$linkNode) continue;
+            if (!$linkNode instanceof DOMElement) continue;
 
-            $url = $linkNode ? trim($linkNode->getAttribute('href')) : '';
+            $url = trim($linkNode->getAttribute('href'));
 
             // The product name is in the img alt text on Singer's pages
             $imgNode = $xpath->query('.//img[contains(@class, "card-img-top")]', $card)->item(0);
-            $name    = $imgNode ? trim($imgNode->getAttribute('alt')) : '';
-            $imgUrl  = $imgNode ? trim($imgNode->getAttribute('src'))  : '';
+            $name    = $imgNode instanceof DOMElement ? trim($imgNode->getAttribute('alt')) : '';
+            $imgUrl  = $imgNode instanceof DOMElement ? trim($imgNode->getAttribute('src'))  : '';
 
             if (empty($name) || empty($url)) continue;
 
@@ -736,11 +718,9 @@ class SingerParser implements CategoryParserInterface {
             if (stripos($cardText, 'out of stock') !== false) {
 
                 $stockStatus = 'out_of_stock';
-
             } elseif (stripos($cardText, 'pre order') !== false) {
 
                 $stockStatus = 'limited';
-
             }
 
             // Try to identify the brand from the product name
@@ -754,9 +734,7 @@ class SingerParser implements CategoryParserInterface {
 
                     $brand = $b;
                     break;
-
                 }
-
             }
 
             $items[] = [
@@ -771,20 +749,19 @@ class SingerParser implements CategoryParserInterface {
                 'source_product_key' => $sku, // use SKU as our dedup key for Singer
 
             ];
-
         }
 
         return $items;
-
     }
-
 }
 
 // Daraz embeds product data as JSON inside <script> tags rather than in the HTML itself.
 // We try two common patterns before giving up and falling back to the generic parser.
-class DarazParser implements CategoryParserInterface {
+class DarazParser implements CategoryParserInterface
+{
 
-    public function parseHtml(string $html, string $baseUrl): array {
+    public function parseHtml(string $html, string $baseUrl): array
+    {
 
         $items = [];
 
@@ -827,7 +804,8 @@ class DarazParser implements CategoryParserInterface {
 
     // Fetch products from Daraz's internal browse/search REST API.
     // Their category pages are full React SPAs so cURL of the HTML page yields no product data.
-    private function fetchViaApi(string $categoryUrl): array {
+    private function fetchViaApi(string $categoryUrl): array
+    {
         $items = [];
 
         // Extract URL key: https://www.daraz.lk/smartphones/ -> smartphones
@@ -836,34 +814,28 @@ class DarazParser implements CategoryParserInterface {
 
         $apiUrl = 'https://www.daraz.lk/rest/search?q=&mod=ajax&options[urlKey]=' . urlencode($path) . '&page=1&limit=40';
 
-        $ch = curl_init($apiUrl);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_TIMEOUT        => 20,
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_HTTPHEADER     => [
+        $fetch = httpFetch($apiUrl, [
+            'timeout' => 20,
+            'headers' => [
                 'Accept: application/json, text/javascript, */*; q=0.01',
                 'X-Requested-With: XMLHttpRequest',
                 'Referer: ' . $categoryUrl,
             ],
-            CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36',
         ]);
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
+        $response = $fetch['body'];
+        $httpCode = $fetch['http_code'];
 
-        if (!$response || $httpCode !== 200) return [];
+        if (!$fetch['ok'] || $httpCode !== 200) return [];
 
         $data = json_decode($response, true);
         if (!is_array($data)) return [];
 
         // The API returns items in different locations depending on API version
         $listItems = $data['mods']['listItems']
-                  ?? $data['listItems']
-                  ?? $data['result']['resultList']
-                  ?? $data['data']['resultList']
-                  ?? [];
+            ?? $data['listItems']
+            ?? $data['result']['resultList']
+            ?? $data['data']['resultList']
+            ?? [];
 
         foreach ($listItems as $prod) {
             if (isset($prod['item'])) $prod = $prod['item'];
@@ -876,7 +848,8 @@ class DarazParser implements CategoryParserInterface {
 
     // Map a raw Daraz product object to our standard item format.
     // Field names vary between API versions, so we check several alternatives for each.
-    private function extractDarazProduct(array $prod, string $baseUrl): ?array {
+    private function extractDarazProduct(array $prod, string $baseUrl): ?array
+    {
 
         $name  = $prod['name']       ?? $prod['title']     ?? null;
         $url   = $prod['productUrl'] ?? $prod['itemUrl']   ?? $prod['url']       ?? null;
@@ -918,7 +891,6 @@ class DarazParser implements CategoryParserInterface {
             'source_product_key' => $sku ? (string) $sku : null,
         ];
     }
-
 }
 
 
@@ -928,9 +900,11 @@ class DarazParser implements CategoryParserInterface {
 // which returns a JSON object with an "html" key containing an escaped HTML fragment.
 // This parser hits that endpoint directly with cURL (no browser needed) and then
 // walks the resulting DOM using BuyAbans' known CSS class names.
-class BuyabansParser implements CategoryParserInterface {
+class BuyabansParser implements CategoryParserInterface
+{
 
-    public function parseHtml(string $html, string $baseUrl): array {
+    public function parseHtml(string $html, string $baseUrl): array
+    {
 
         // Step 1: Extract category_id from the URL the admin configured.
         // BuyAbans category pages look like:
@@ -946,26 +920,20 @@ class BuyabansParser implements CategoryParserInterface {
             // Step 2: Hit the AJAX endpoint that actually contains the product data.
             // We send a browser-like UA so requests aren't rejected.
             $apiUrl = 'https://buyabans.com/product-list?category_id=' . $categoryId
-                    . '&stamp_banner_id=0&sort=new_arrivals&is_search_list=false';
+                . '&stamp_banner_id=0&sort=new_arrivals&is_search_list=false';
 
-            $ch = curl_init($apiUrl);
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_FOLLOWLOCATION => true,
-                CURLOPT_TIMEOUT        => 20,
-                CURLOPT_SSL_VERIFYPEER => false,
-                CURLOPT_HTTPHEADER     => [
+            $fetch = httpFetch($apiUrl, [
+                'timeout' => 20,
+                'headers' => [
                     'Accept: application/json, text/javascript, */*; q=0.01',
                     'X-Requested-With: XMLHttpRequest',
                     'Referer: ' . $baseUrl,
                 ],
-                CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             ]);
 
-            $apiResponse = curl_exec($ch);
-            curl_close($ch);
+            $apiResponse = $fetch['body'];
 
-            if ($apiResponse) {
+            if ($fetch['ok'] && $apiResponse !== '') {
 
                 // Step 3: The response is a JSON object; the "html" key holds the product cards.
                 $decoded = json_decode($apiResponse, true);
@@ -974,16 +942,12 @@ class BuyabansParser implements CategoryParserInterface {
 
                     // The HTML is JSON-encoded so unicode sequences and \/ are already unescaped by json_decode
                     $productHtml = $decoded['html'];
-
                 } elseif (is_string($apiResponse) && strpos($apiResponse, 'product-list-item') !== false) {
 
                     // Fallback: some versions return raw HTML directly without a JSON wrapper
                     $productHtml = $apiResponse;
-
                 }
-
             }
-
         }
 
         // Step 4: If the AJAX approach failed, try to parse whatever HTML was passed in.
@@ -993,7 +957,6 @@ class BuyabansParser implements CategoryParserInterface {
         }
 
         return $this->parseProductHtml($productHtml, $baseUrl);
-
     }
 
     // -------------------------------------------------------------------------
@@ -1002,7 +965,8 @@ class BuyabansParser implements CategoryParserInterface {
     //   category_id: 15,
     // or it may appear in an AJAX request captured from the network.
     // -------------------------------------------------------------------------
-    private function extractCategoryId(string $html, string $baseUrl): ?int {
+    private function extractCategoryId(string $html, string $baseUrl): ?int
+    {
 
         // Pattern 1: URL query param ?category_id=15 (direct API URL from admin)
         $parsedUrl = parse_url($baseUrl);
@@ -1049,7 +1013,6 @@ class BuyabansParser implements CategoryParserInterface {
         }
 
         return null;
-
     }
 
     // -------------------------------------------------------------------------
@@ -1061,136 +1024,164 @@ class BuyabansParser implements CategoryParserInterface {
     //   - <a href="...">      for the product URL (inside .product-imgage)
     //   - data-product-id     on the wishlist button — used as our dedup SKU
     // -------------------------------------------------------------------------
-    private function parseProductHtml(string $html, string $baseUrl): array {
+    private function parseProductHtml(string $html, string $baseUrl): array
+    {
 
         $items = [];
 
         $dom = new DOMDocument();
         @$dom->loadHTML('<?xml encoding="utf-8"?>' . $html, LIBXML_NOERROR | LIBXML_NOWARNING);
-$xpath = new DOMXPath($dom);
+        $xpath = new DOMXPath($dom);
 
-// Each BuyAbans product card sits inside div.product-list-item
-$cards = $xpath->query('//*[contains(@class, "product-list-item")]');
+        // Each BuyAbans product card sits inside div.product-list-item
+        $cards = $xpath->query('//*[contains(@class, "product-list-item")]');
 
-foreach ($cards as $card) {
+        foreach ($cards as $card) {
+            if (!$card instanceof DOMElement) continue;
 
-// --- Name ---
-$nameNode = $xpath->query('.//*[contains(@class, "pro-name-compact")]', $card)->item(0);
-if (!$nameNode) continue;
+            // --- Name ---
+            $nameNode = $xpath->query('.//*[contains(@class, "pro-name-compact")]', $card)->item(0);
+            if (!$nameNode instanceof DOMElement) continue;
 
-// Prefer the title attribute (never truncated) over textContent
-$name = trim($nameNode->getAttribute('title') ?: $nameNode->textContent);
-if (empty($name)) continue;
+            // Prefer the title attribute (never truncated) over textContent
+            $name = trim($nameNode->getAttribute('title') ?: $nameNode->textContent);
+            if (empty($name)) continue;
 
-// --- Product URL ---
-// The image anchor is the most reliable link — it always points to the product page
-$linkNode = $xpath->query('.//*[contains(@class, "product-imgage")]//a[@href] | .//a[contains(@href, "buyabans.com") or
+            // --- Product URL ---
+            // The image anchor is the most reliable link — it always points to the product page
+            $linkNode = $xpath->query('.//*[contains(@class, "product-imgage")]//a[@href] | .//a[contains(@href, "buyabans.com") or
 starts-with(@href, "/")]', $card)->item(0);
-if (!$linkNode) {
-$linkNode = $xpath->query('.//a[@href]', $card)->item(0);
-}
-if (!$linkNode) continue;
+            if (!$linkNode) {
+                $linkNode = $xpath->query('.//a[@href]', $card)->item(0);
+            }
+            if (!$linkNode instanceof DOMElement) continue;
 
-$url = trim($linkNode->getAttribute('href'));
-if (empty($url) || $url === '#') continue;
+            $url = trim($linkNode->getAttribute('href'));
+            if (empty($url) || $url === '#') continue;
 
-// Resolve to absolute URL
-if (strpos($url, 'http') !== 0) {
-$parsed = parse_url($baseUrl);
-$url = ($parsed['scheme'] ?? 'https') . '://' . ($parsed['host'] ?? 'buyabans.com') . '/' . ltrim($url, '/');
-}
+            // Resolve to absolute URL
+            if (strpos($url, 'http') !== 0) {
+                $parsed = parse_url($baseUrl);
+                $url = ($parsed['scheme'] ?? 'https') . '://' . ($parsed['host'] ?? 'buyabans.com') . '/' . ltrim($url, '/');
+            }
 
-// --- Price ---
-// BuyAbans puts the selling price in span.selling-price.
-// When a product is on sale there are TWO price spans (original + discounted);
-// the last one is always the actual selling price.
-$priceNodes = $xpath->query('.//*[contains(@class, "selling-price")]', $card);
-$price = null;
+            // --- Price ---
+            // BuyAbans puts the selling price in span.selling-price.
+            // When a product is on sale there are TWO price spans (original + discounted);
+            // the last one is always the actual selling price.
+            $priceNodes = $xpath->query('.//*[contains(@class, "selling-price")]', $card);
+            $price = null;
 
-if ($priceNodes->length > 0) {
-// Use the LAST span — on discounted items the last one is the sale price
-$lastPriceNode = $priceNodes->item($priceNodes->length - 1);
-$priceRaw = trim($lastPriceNode->textContent);
-$price = (float) preg_replace('/[^0-9.]/', '', str_replace(',', '', $priceRaw));
-}
+            if ($priceNodes->length > 0) {
+                // Use the LAST span — on discounted items the last one is the sale price
+                $lastPriceNode = $priceNodes->item($priceNodes->length - 1);
+                $priceRaw = trim($lastPriceNode->textContent);
+                $price = (float) preg_replace('/[^0-9.]/', '', str_replace(',', '', $priceRaw));
+            }
 
-// Fallback: regex scan of the raw card text for "Rs. X,XXX"
-if (!$price) {
-$cardText = $card->textContent;
-if (preg_match_all('/Rs\.\s*([\d,]+(?:\.\d{2})?)/', $cardText, $pm)) {
-// Use the last matched price (same logic as above)
-$price = (float) str_replace(',', '', end($pm[1]));
-}
-}
+            // Fallback: regex scan of the raw card text for "Rs. X,XXX"
+            if (!$price) {
+                $cardText = $card->textContent;
+                if (preg_match_all('/Rs\.\s*([\d,]+(?:\.\d{2})?)/', $cardText, $pm)) {
+                    // Use the last matched price (same logic as above)
+                    $price = (float) str_replace(',', '', end($pm[1]));
+                }
+            }
 
-if (!$price || $price <= 0) continue;
+            if (!$price || $price <= 0) continue;
 
             // --- Image ---
             $imgNode = $xpath->query('.//*[contains(@class, "grid-product-img")] | .//img', $card)->item(0);
             $imgUrl = '';
-            if ($imgNode) {
+            if ($imgNode instanceof DOMElement) {
                 $imgUrl = trim($imgNode->getAttribute('data-src') ?: $imgNode->getAttribute('src'));
             }
 
-    // --- Stock status ---
-    $cardText = strtolower($card->textContent);
-    $stockStatus = (strpos($cardText, 'out of stock') !== false) ? 'out_of_stock' : 'in_stock';
+            // --- Stock status ---
+            $cardText = strtolower($card->textContent);
+            $stockStatus = (strpos($cardText, 'out of stock') !== false) ? 'out_of_stock' : 'in_stock';
 
-    // --- SKU (product ID) ---
-    // BuyAbans puts data-product-id on the wishlist toggle button
-    $skuNode = $xpath->query('.//*[@data-product-id]', $card)->item(0);
-    $sku = $skuNode ? trim($skuNode->getAttribute('data-product-id')) : null;
+            // --- SKU (product ID) ---
+            // BuyAbans puts data-product-id on the wishlist toggle button
+            $skuNode = $xpath->query('.//*[@data-product-id]', $card)->item(0);
+            $sku = $skuNode instanceof DOMElement ? trim($skuNode->getAttribute('data-product-id')) : null;
 
-    // --- Brand ---
-    $brand = null;
-    $knownBrands = ['Samsung', 'Apple', 'LG', 'Sony', 'Panasonic', 'Philips', 'Hisense',
-    'Singer', 'Nokia', 'Xiaomi', 'Oppo', 'Vivo', 'Huawei', 'Haier', 'Midea',
-    'Beko', 'Bosch', 'Sharp', 'TCL', 'Whirlpool', 'Electrolux', 'Motorola',
-    'Realme', 'Infinix', 'Tecno', 'Itel', 'Lenovo', 'Honor'];
+            // --- Brand ---
+            $brand = null;
+            $knownBrands = [
+                'Samsung',
+                'Apple',
+                'LG',
+                'Sony',
+                'Panasonic',
+                'Philips',
+                'Hisense',
+                'Singer',
+                'Nokia',
+                'Xiaomi',
+                'Oppo',
+                'Vivo',
+                'Huawei',
+                'Haier',
+                'Midea',
+                'Beko',
+                'Bosch',
+                'Sharp',
+                'TCL',
+                'Whirlpool',
+                'Electrolux',
+                'Motorola',
+                'Realme',
+                'Infinix',
+                'Tecno',
+                'Itel',
+                'Lenovo',
+                'Honor'
+            ];
 
-    $nameLower = strtolower($name);
-    foreach ($knownBrands as $b) {
-    if (strpos($nameLower, strtolower($b)) !== false) {
-    $brand = $b;
-    break;
+            $nameLower = strtolower($name);
+            foreach ($knownBrands as $b) {
+                if (strpos($nameLower, strtolower($b)) !== false) {
+                    $brand = $b;
+                    break;
+                }
+            }
+
+            $items[] = [
+                'name' => $name,
+                'product_url' => $url,
+                'image_url' => $imgUrl ?: null,
+                'price' => $price,
+                'brand' => $brand,
+                'model' => null,
+                'stock_status' => $stockStatus,
+                'source_product_key' => $sku ?: null,
+            ];
+        }
+
+        return $items;
     }
-    }
-
-    $items[] = [
-    'name' => $name,
-    'product_url' => $url,
-    'image_url' => $imgUrl ?: null,
-    'price' => $price,
-    'brand' => $brand,
-    'model' => null,
-    'stock_status' => $stockStatus,
-    'source_product_key' => $sku ?: null,
-    ];
-
-    }
-
-    return $items;
-
-    }
-
-    }
-class SoftlogicParser implements CategoryParserInterface {
-    public function parseHtml(string $html, string $baseUrl): array {
+}
+class SoftlogicParser implements CategoryParserInterface
+{
+    public function parseHtml(string $html, string $baseUrl): array
+    {
         $items = [];
         $dom = new DOMDocument();
         @$dom->loadHTML($html, LIBXML_NOERROR | LIBXML_NOWARNING);
         $xpath = new DOMXPath($dom);
         $cards = $xpath->query('//div[contains(@class, "item-box")]');
         foreach ($cards as $card) {
+            if (!$card instanceof DOMElement) continue;
             $linkNode = $xpath->query('.//a', $card)->item(0);
-            if (!$linkNode) continue;
+            if (!$linkNode instanceof DOMElement) continue;
             $url = trim($linkNode->getAttribute('href'));
             if (empty($url)) continue;
             if (strpos($url, 'http') !== 0) $url = 'https://www.softlogic.lk/' . ltrim($url, '/');
             $imgNode = $xpath->query('.//img', $card)->item(0);
-            $imgUrl  = $imgNode ? trim($imgNode->getAttribute('src')) : '';
+            $imgUrl  = $imgNode instanceof DOMElement ? trim($imgNode->getAttribute('src')) : '';
             $nameNode = $xpath->query('.//h2[contains(@class, "product-title")]', $card)->item(0);
-            $name = $nameNode ? trim($nameNode->textContent) : ($imgNode ? trim($imgNode->getAttribute('alt')) : '');
+            $name = $nameNode ? trim($nameNode->textContent) : ($imgNode instanceof DOMElement ? trim($imgNode->getAttribute('alt')) : '');
             if (empty($name)) continue;
             $priceNode = $xpath->query('.//*[contains(@class, "discounted-price")] | .//*[contains(@class, "main-price")]', $card);
             $price = 0;
@@ -1209,7 +1200,7 @@ class SoftlogicParser implements CategoryParserInterface {
                 'price'              => $price,
                 'brand'              => extractBrandFromTitle($name),
                 'stock_status'       => 'in_stock',
-                'source_product_key' => null,  
+                'source_product_key' => null,
             ];
         }
         if (empty($items)) {

@@ -8,6 +8,7 @@
 $adminTitle = 'Price Scraper';
 require_once __DIR__ . '/header.php';
 require_once __DIR__ . '/../includes/scraper.php';
+require_once __DIR__ . '/../includes/http_client.php';
 
 $pdo = getDB();
 ensureScraperTables($pdo);
@@ -103,24 +104,17 @@ if ($fetchUrl !== '') {
         // Use cURL with hard timeouts — file_get_contents() stream context 'timeout'
         // is unreliable on Windows/WAMP and can freeze the admin page for 120 s.
         set_time_limit(30);
-        $ch = curl_init($fetchUrl);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_MAXREDIRS      => 5,
-            CURLOPT_CONNECTTIMEOUT => 8,
-            CURLOPT_TIMEOUT        => 15,
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_SSL_VERIFYHOST => false,
-            CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-            CURLOPT_ENCODING       => '',
+        $fetch = httpFetch($fetchUrl, [
+            'timeout' => 15,
+            'connect_timeout' => 8,
+            'max_redirs' => 5,
+            'encoding' => '',
         ]);
-        $html     = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $curlErr  = curl_error($ch);
-        curl_close($ch);
+        $html = $fetch['body'];
+        $httpCode = $fetch['http_code'];
+        $curlErr = $fetch['error'];
 
-        if ($html === false || !empty($curlErr) || $httpCode >= 400) {
+        if (!$fetch['ok']) {
             $error = 'Fetch failed' . (!empty($curlErr) ? ': ' . $curlErr : " (HTTP $httpCode)") . '. The site may block requests or require JavaScript.';
         } else {
             $title = null;
@@ -171,121 +165,121 @@ $links = $linksStmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
 <style>
-/* Scraper page — full viewport fit */
-.scraper-layout {
-    display: flex;
-    gap: 1.25rem;
-    height: calc(100vh - 80px - 3.5rem);
-    /* viewport minus topbar and content padding */
-    min-height: 480px;
-}
-
-.scraper-col-left {
-    flex: 0 0 380px;
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-    overflow-y: auto;
-    /* scrollable so Add Price form is always reachable */
-    overflow-x: hidden;
-}
-
-.scraper-col-right {
-    flex: 1 1 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-}
-
-/* fetch card — fixed height */
-.scraper-fetch-card {
-    flex-shrink: 0;
-}
-
-/* result card — natural height, no flex growing needed since col scrolls */
-.scraper-result-card {
-    flex-shrink: 0;
-}
-
-.scraper-result-card .form-card-body {
-    /* scrolling happens at column level */
-    overflow: visible;
-}
-
-/* right col — full height card */
-.scraper-links-card {
-    flex: 1 1 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-}
-
-.scraper-links-card .form-card-body {
-    flex: 1 1 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-}
-
-/* the add-link form + table container */
-.scraper-table-wrap {
-    flex: 1 1 0;
-    overflow-y: auto;
-}
-
-/* shrink URL cell text */
-.url-cell {
-    max-width: 200px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: .75rem;
-    color: #6b7a99;
-}
-
-@media (max-width: 991px) {
+    /* Scraper page — full viewport fit */
     .scraper-layout {
+        display: flex;
+        gap: 1.25rem;
+        height: calc(100vh - 80px - 3.5rem);
+        /* viewport minus topbar and content padding */
+        min-height: 480px;
+    }
+
+    .scraper-col-left {
+        flex: 0 0 380px;
+        display: flex;
         flex-direction: column;
-        height: auto;
+        gap: 1rem;
+        overflow-y: auto;
+        /* scrollable so Add Price form is always reachable */
+        overflow-x: hidden;
     }
 
-    .scraper-col-left,
     .scraper-col-right {
-        flex: unset;
+        flex: 1 1 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
     }
 
-    .scraper-result-card,
+    /* fetch card — fixed height */
+    .scraper-fetch-card {
+        flex-shrink: 0;
+    }
+
+    /* result card — natural height, no flex growing needed since col scrolls */
+    .scraper-result-card {
+        flex-shrink: 0;
+    }
+
+    .scraper-result-card .form-card-body {
+        /* scrolling happens at column level */
+        overflow: visible;
+    }
+
+    /* right col — full height card */
     .scraper-links-card {
-        max-height: 420px;
+        flex: 1 1 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
     }
-}
 
-/* price chip buttons */
-.price-chip {
-    padding: .15rem .5rem;
-    font-size: .72rem;
-    border: 1px solid var(--admin-primary);
-    color: var(--admin-primary-dark);
-    background: rgba(246, 166, 35, .08);
-    border-radius: 6px;
-    cursor: pointer;
-    transition: background .15s;
-}
+    .scraper-links-card .form-card-body {
+        flex: 1 1 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
 
-.price-chip:hover {
-    background: rgba(246, 166, 35, .22);
-}
+    /* the add-link form + table container */
+    .scraper-table-wrap {
+        flex: 1 1 0;
+        overflow-y: auto;
+    }
 
-/* quick-add form compactness */
-.quick-add-form .form-select-sm,
-.quick-add-form .form-control-sm {
-    font-size: .8rem;
-}
+    /* shrink URL cell text */
+    .url-cell {
+        max-width: 200px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: .75rem;
+        color: #6b7a99;
+    }
 
-/* fw-600 utility */
-.fw-600 {
-    font-weight: 600;
-}
+    @media (max-width: 991px) {
+        .scraper-layout {
+            flex-direction: column;
+            height: auto;
+        }
+
+        .scraper-col-left,
+        .scraper-col-right {
+            flex: unset;
+        }
+
+        .scraper-result-card,
+        .scraper-links-card {
+            max-height: 420px;
+        }
+    }
+
+    /* price chip buttons */
+    .price-chip {
+        padding: .15rem .5rem;
+        font-size: .72rem;
+        border: 1px solid var(--admin-primary);
+        color: var(--admin-primary-dark);
+        background: rgba(246, 166, 35, .08);
+        border-radius: 6px;
+        cursor: pointer;
+        transition: background .15s;
+    }
+
+    .price-chip:hover {
+        background: rgba(246, 166, 35, .22);
+    }
+
+    /* quick-add form compactness */
+    .quick-add-form .form-select-sm,
+    .quick-add-form .form-control-sm {
+        font-size: .8rem;
+    }
+
+    /* fw-600 utility */
+    .fw-600 {
+        font-weight: 600;
+    }
 </style>
 
 <div class="scraper-layout">
@@ -303,8 +297,8 @@ $links = $linksStmt->fetchAll(PDO::FETCH_ASSOC);
                     Paste a store product URL to detect its title &amp; price in raw HTML.
                 </p>
                 <?php if ($error): ?>
-                <div class="alert alert-danger py-2 small"><i
-                        class="bi bi-exclamation-triangle me-1"></i><?= htmlspecialchars($error) ?></div>
+                    <div class="alert alert-danger py-2 small"><i
+                            class="bi bi-exclamation-triangle me-1"></i><?= htmlspecialchars($error) ?></div>
                 <?php endif; ?>
                 <form method="get" action="<?= url('admin/scraper.php') ?>" class="mb-0" onsubmit="const b=this.querySelector('button[type=submit]'); b.innerHTML='<i class=\'bi bi-arrow-repeat spin me-1\'></i>Fetching...'; b.disabled=true;">
                     <div class="input-group">
@@ -328,39 +322,39 @@ $links = $linksStmt->fetchAll(PDO::FETCH_ASSOC);
                     <?= $isFetched ? 'Fetch Result & Add Price' : 'Add Price to Product' ?>
                 </h6>
                 <?php if ($isFetched): ?>
-                <small class="text-muted"><?= number_format($result['length']) ?> bytes</small>
+                    <small class="text-muted"><?= number_format($result['length']) ?> bytes</small>
                 <?php endif; ?>
             </div>
             <div class="form-card-body">
 
                 <?php if ($saved): ?>
-                <div class="alert alert-success py-2 small mb-2"><i class="bi bi-check-circle me-1"></i>Price saved
-                    successfully!</div>
+                    <div class="alert alert-success py-2 small mb-2"><i class="bi bi-check-circle me-1"></i>Price saved
+                        successfully!</div>
                 <?php endif; ?>
 
                 <?php if ($isFetched): ?>
-                <!-- Detected info -->
-                <?php if ($result['title']): ?>
-                <p class="mb-1 small"><strong>Title:</strong> <?= htmlspecialchars($result['title']) ?></p>
-                <?php endif; ?>
-                <?php if ($result['firstPrice']): ?>
-                <p class="mb-1 small">
-                    <strong>Auto-detected price:</strong>
-                    <span class="badge bg-success ms-1">Rs <?= number_format($result['firstPrice'], 2) ?></span>
-                    <?php if (!empty($result['origPrice'])): ?>
-                    <span class="text-muted text-decoration-line-through ms-1" style="font-size:.78rem;">
-                        Rs <?= number_format($result['origPrice'], 2) ?>
-                    </span>
+                    <!-- Detected info -->
+                    <?php if ($result['title']): ?>
+                        <p class="mb-1 small"><strong>Title:</strong> <?= htmlspecialchars($result['title']) ?></p>
                     <?php endif; ?>
-                </p>
-                <?php endif; ?>
-                <?php if (!empty($result['prices'])): ?>
-                <p class="mb-0 small text-muted">All Rs/LKR values on page:
-                    <?= implode(', ', array_map('htmlspecialchars', array_slice($result['prices'], 0, 5))) ?>
-                    <?= count($result['prices']) > 5 ? ' …' : '' ?>
-                </p>
-                <?php endif; ?>
-                <hr class="my-2">
+                    <?php if ($result['firstPrice']): ?>
+                        <p class="mb-1 small">
+                            <strong>Auto-detected price:</strong>
+                            <span class="badge bg-success ms-1">Rs <?= number_format($result['firstPrice'], 2) ?></span>
+                            <?php if (!empty($result['origPrice'])): ?>
+                                <span class="text-muted text-decoration-line-through ms-1" style="font-size:.78rem;">
+                                    Rs <?= number_format($result['origPrice'], 2) ?>
+                                </span>
+                            <?php endif; ?>
+                        </p>
+                    <?php endif; ?>
+                    <?php if (!empty($result['prices'])): ?>
+                        <p class="mb-0 small text-muted">All Rs/LKR values on page:
+                            <?= implode(', ', array_map('htmlspecialchars', array_slice($result['prices'], 0, 5))) ?>
+                            <?= count($result['prices']) > 5 ? ' …' : '' ?>
+                        </p>
+                    <?php endif; ?>
+                    <hr class="my-2">
                 <?php endif; ?>
 
                 <!-- Quick Add Price Form -->
@@ -375,9 +369,9 @@ $links = $linksStmt->fetchAll(PDO::FETCH_ASSOC);
                         <select name="product_id" class="form-select form-select-sm" required>
                             <option value="">Select product…</option>
                             <?php foreach ($allProducts as $pr): ?>
-                            <option value="<?= (int) $pr['id'] ?>">
-                                <?= e(($pr['brand'] ? $pr['brand'] . ' ' : '') . $pr['name']) ?>
-                            </option>
+                                <option value="<?= (int) $pr['id'] ?>">
+                                    <?= e(($pr['brand'] ? $pr['brand'] . ' ' : '') . $pr['name']) ?>
+                                </option>
                             <?php endforeach; ?>
                         </select>
                     </div>
@@ -397,9 +391,9 @@ $links = $linksStmt->fetchAll(PDO::FETCH_ASSOC);
                                     str_contains($storeHost, str_replace('www.', '', $fetchHost))
                                 );
                             ?>
-                            <option value="<?= (int) $st['id'] ?>" <?= $autoMatch ? 'selected' : '' ?>>
-                                <?= e($st['name']) ?>
-                            </option>
+                                <option value="<?= (int) $st['id'] ?>" <?= $autoMatch ? 'selected' : '' ?>>
+                                    <?= e($st['name']) ?>
+                                </option>
                             <?php endforeach; ?>
                         </select>
                     </div>
@@ -414,17 +408,17 @@ $links = $linksStmt->fetchAll(PDO::FETCH_ASSOC);
                                 value="<?= $result['firstPrice'] ? htmlspecialchars($result['firstPrice']) : '' ?>">
                         </div>
                         <?php if (!empty($result['prices'])): ?>
-                        <div class="mt-1">
-                            <?php foreach ($result['prices'] as $pv): ?>
-                            <?php $num = preg_replace('/[^0-9.]/', '', $pv);
+                            <div class="mt-1">
+                                <?php foreach ($result['prices'] as $pv): ?>
+                                    <?php $num = preg_replace('/[^0-9.]/', '', $pv);
                                     if (!$num)
                                         continue; ?>
-                            <button type="button" class="btn btn-xs price-chip me-1 mb-1"
-                                onclick="this.closest('form').querySelector('[name=price]').value='<?= htmlspecialchars($num) ?>'">
-                                <?= htmlspecialchars($pv) ?>
-                            </button>
-                            <?php endforeach; ?>
-                        </div>
+                                    <button type="button" class="btn btn-xs price-chip me-1 mb-1"
+                                        onclick="this.closest('form').querySelector('[name=price]').value='<?= htmlspecialchars($num) ?>'">
+                                        <?= htmlspecialchars($pv) ?>
+                                    </button>
+                                <?php endforeach; ?>
+                            </div>
                         <?php endif; ?>
                     </div>
 
@@ -483,8 +477,8 @@ $links = $linksStmt->fetchAll(PDO::FETCH_ASSOC);
 
                 <!-- Alerts -->
                 <?php if ($msg): ?>
-                <div class="alert alert-success py-2 small mb-2"><i class="bi bi-check-circle me-1"></i><?= e($msg) ?>
-                </div>
+                    <div class="alert alert-success py-2 small mb-2"><i class="bi bi-check-circle me-1"></i><?= e($msg) ?>
+                    </div>
                 <?php endif; ?>
 
                 <!-- Add-link form -->
@@ -496,9 +490,9 @@ $links = $linksStmt->fetchAll(PDO::FETCH_ASSOC);
                         <select name="product_id" class="form-select form-select-sm" required>
                             <option value="">Select product…</option>
                             <?php foreach ($allProducts as $p): ?>
-                            <option value="<?= (int) $p['id'] ?>">
-                                <?= e(($p['brand'] ? $p['brand'] . ' ' : '') . $p['name']) ?>
-                            </option>
+                                <option value="<?= (int) $p['id'] ?>">
+                                    <?= e(($p['brand'] ? $p['brand'] . ' ' : '') . $p['name']) ?>
+                                </option>
                             <?php endforeach; ?>
                         </select>
                     </div>
@@ -507,7 +501,7 @@ $links = $linksStmt->fetchAll(PDO::FETCH_ASSOC);
                         <select name="store_id" class="form-select form-select-sm" required>
                             <option value="">Select store…</option>
                             <?php foreach ($allStores as $s): ?>
-                            <option value="<?= (int) $s['id'] ?>"><?= e($s['name']) ?></option>
+                                <option value="<?= (int) $s['id'] ?>"><?= e($s['name']) ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>
@@ -536,60 +530,64 @@ $links = $linksStmt->fetchAll(PDO::FETCH_ASSOC);
                         </thead>
                         <tbody>
                             <?php foreach ($links as $l): ?>
-                            <tr>
-                                <td>
-                                    <div class="fw-600" style="font-size:.82rem;">
-                                        <?= e(mb_strimwidth(($l['brand'] ? $l['brand'] . ' ' : '') . $l['product_name'], 0, 30, '…')) ?>
-                                    </div>
-                                </td>
-                                <td style="font-size:.82rem;"><?= e($l['store_name']) ?></td>
-                                <td>
-                                    <a href="<?= e($l['product_url']) ?>" target="_blank" class="url-cell d-block"
-                                        title="<?= e($l['product_url']) ?>">
-                                        <?= e(parse_url($l['product_url'], PHP_URL_HOST) . '…') ?>
-                                    </a>
-                                </td>
-                                <td>
-                                    <?php
+                                <tr>
+                                    <td>
+                                        <div class="fw-600" style="font-size:.82rem;">
+                                            <?= e(mb_strimwidth(($l['brand'] ? $l['brand'] . ' ' : '') . $l['product_name'], 0, 30, '…')) ?>
+                                        </div>
+                                    </td>
+                                    <td style="font-size:.82rem;"><?= e($l['store_name']) ?></td>
+                                    <td>
+                                        <a href="<?= e($l['product_url']) ?>" target="_blank" class="url-cell d-block"
+                                            title="<?= e($l['product_url']) ?>">
+                                            <?= e(parse_url($l['product_url'], PHP_URL_HOST) . '…') ?>
+                                        </a>
+                                    </td>
+                                    <td>
+                                        <?php
                                         $st = $l['last_status'] ?? '-';
-                                        $badgeClass = match ($st) {
-                                            'ok' => 'bg-success',
-                                            'error' => 'bg-danger',
-                                            'manual' => 'bg-info',
-                                            'skip' => 'bg-warning text-dark',
-                                            default => 'bg-secondary',
-                                        };
+                                        if ($st === 'ok') {
+                                            $badgeClass = 'bg-success';
+                                        } elseif ($st === 'error') {
+                                            $badgeClass = 'bg-danger';
+                                        } elseif ($st === 'manual') {
+                                            $badgeClass = 'bg-info';
+                                        } elseif ($st === 'skip') {
+                                            $badgeClass = 'bg-warning text-dark';
+                                        } else {
+                                            $badgeClass = 'bg-secondary';
+                                        }
                                         ?>
-                                    <span class="badge <?= $badgeClass ?>"><?= e($st) ?></span>
-                                    <?php if (!empty($l['last_error'])): ?>
-                                    <div class="text-danger" style="font-size:.72rem;">
-                                        <?= e(mb_strimwidth($l['last_error'], 0, 40, '…')) ?>
-                                    </div>
-                                    <?php endif; ?>
-                                </td>
-                                <td class="text-muted" style="font-size:.78rem;">
-                                    <?= $l['last_scraped_at'] ? e(date('d M H:i', strtotime($l['last_scraped_at']))) : '—' ?>
-                                </td>
-                                <td>
-                                    <form method="post" action="<?= url('admin/scraper.php') ?>" class="m-0"
-                                          onsubmit="const b=this.querySelector('button[type=submit]'); b.innerHTML='<i class=\'bi bi-arrow-repeat spin\'></i>'; b.disabled=true;">
-                                        <?= csrf_field() ?>
-                                        <input type="hidden" name="action" value="toggle">
-                                        <input type="hidden" name="id" value="<?= (int) $l['id'] ?>">
-                                        <input type="hidden" name="enabled"
-                                            value="<?= (int) ($l['auto_enabled'] ? 0 : 1) ?>">
-                                        <button type="submit"
-                                            class="btn btn-sm <?= $l['auto_enabled'] ? 'btn-success' : 'btn-outline-secondary' ?>">
-                                            <?= $l['auto_enabled'] ? '<i class="bi bi-check-circle me-1"></i>On' : '<i class="bi bi-circle me-1"></i>Off' ?>
-                                        </button>
-                                    </form>
-                                </td>
-                            </tr>
+                                        <span class="badge <?= $badgeClass ?>"><?= e($st) ?></span>
+                                        <?php if (!empty($l['last_error'])): ?>
+                                            <div class="text-danger" style="font-size:.72rem;">
+                                                <?= e(mb_strimwidth($l['last_error'], 0, 40, '…')) ?>
+                                            </div>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td class="text-muted" style="font-size:.78rem;">
+                                        <?= $l['last_scraped_at'] ? e(date('d M H:i', strtotime($l['last_scraped_at']))) : '—' ?>
+                                    </td>
+                                    <td>
+                                        <form method="post" action="<?= url('admin/scraper.php') ?>" class="m-0"
+                                            onsubmit="const b=this.querySelector('button[type=submit]'); b.innerHTML='<i class=\'bi bi-arrow-repeat spin\'></i>'; b.disabled=true;">
+                                            <?= csrf_field() ?>
+                                            <input type="hidden" name="action" value="toggle">
+                                            <input type="hidden" name="id" value="<?= (int) $l['id'] ?>">
+                                            <input type="hidden" name="enabled"
+                                                value="<?= (int) ($l['auto_enabled'] ? 0 : 1) ?>">
+                                            <button type="submit"
+                                                class="btn btn-sm <?= $l['auto_enabled'] ? 'btn-success' : 'btn-outline-secondary' ?>">
+                                                <?= $l['auto_enabled'] ? '<i class="bi bi-check-circle me-1"></i>On' : '<i class="bi bi-circle me-1"></i>Off' ?>
+                                            </button>
+                                        </form>
+                                    </td>
+                                </tr>
                             <?php endforeach; ?>
                             <?php if (empty($links)): ?>
-                            <tr>
-                                <td colspan="6" class="text-center text-muted py-4">No links yet. Add one above.</td>
-                            </tr>
+                                <tr>
+                                    <td colspan="6" class="text-center text-muted py-4">No links yet. Add one above.</td>
+                                </tr>
                             <?php endif; ?>
                         </tbody>
                     </table>
@@ -602,77 +600,87 @@ $links = $linksStmt->fetchAll(PDO::FETCH_ASSOC);
 </div><!-- /scraper-layout -->
 
 <script>
-// ── AJAX sequential scraper ────────────────────────────────────────────────
-// Fetches link IDs from the table, then calls /api/scrape-one.php one-by-one
-// so PHP never hits max_execution_time regardless of how many links exist.
+    // ── AJAX sequential scraper ────────────────────────────────────────────────
+    // Fetches link IDs from the table, then calls /api/scrape-one.php one-by-one
+    // so PHP never hits max_execution_time regardless of how many links exist.
 
-// Map of link id -> display label ("ProductName @ Store")
-const LINK_MAP = <?= json_encode(array_column(
-    array_map(fn($l) => [
-        'id'    => $l['id'],
-        'label' => trim(($l['brand'] ? $l['brand'] . ' ' : '') . $l['product_name']) . ' @ ' . $l['store_name'],
-    ], $links),
-    'label', 'id'
-)) ?>;
-const LINK_IDS   = Object.keys(LINK_MAP).map(Number);
-const CSRF_TOKEN = '<?= csrf_token() ?>';
-const SCRAPE_URL = '<?= url('api/scrape-one.php') ?>';
+    // Map of link id -> display label ("ProductName @ Store")
+    const LINK_MAP = <?= json_encode(array_column(
+                            array_map(fn($l) => [
+                                'id'    => $l['id'],
+                                'label' => trim(($l['brand'] ? $l['brand'] . ' ' : '') . $l['product_name']) . ' @ ' . $l['store_name'],
+                            ], $links),
+                            'label',
+                            'id'
+                        )) ?>;
+    const LINK_IDS = Object.keys(LINK_MAP).map(Number);
+    const CSRF_TOKEN = '<?= csrf_token() ?>';
+    const SCRAPE_URL = '<?= url('api/scrape-one.php') ?>';
 
-async function runAllAjax() {
-    const btn      = document.getElementById('btnRunAll');
-    const progress = document.getElementById('scraperProgress');
-    const bar      = document.getElementById('scraperBar');
-    const status   = document.getElementById('scraperStatus');
-    const count    = document.getElementById('scraperCount');
-    const log      = document.getElementById('scraperLog');
+    async function runAllAjax() {
+        const btn = document.getElementById('btnRunAll');
+        const progress = document.getElementById('scraperProgress');
+        const bar = document.getElementById('scraperBar');
+        const status = document.getElementById('scraperStatus');
+        const count = document.getElementById('scraperCount');
+        const log = document.getElementById('scraperLog');
 
-    if (btn.disabled) return;
-    btn.disabled = true;
-    btn.innerHTML = '<i class="bi bi-arrow-repeat spin me-1"></i>Running…';
-    progress.style.display = '';
-    log.innerHTML = '';
+        if (btn.disabled) return;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-arrow-repeat spin me-1"></i>Running…';
+        progress.style.display = '';
+        log.innerHTML = '';
 
-    const total = LINK_IDS.length;
-    let ok = 0, fail = 0;
+        const total = LINK_IDS.length;
+        let ok = 0,
+            fail = 0;
 
-    for (let i = 0; i < total; i++) {
-        const id    = LINK_IDS[i];
-        const label = LINK_MAP[id] || `Link #${id}`;
-        count.textContent = `${i + 1} / ${total}`;
-        status.textContent = `Scraping: ${label}…`;
-        bar.style.width = `${Math.round((i / total) * 100)}%`;
+        for (let i = 0; i < total; i++) {
+            const id = LINK_IDS[i];
+            const label = LINK_MAP[id] || `Link #${id}`;
+            count.textContent = `${i + 1} / ${total}`;
+            status.textContent = `Scraping: ${label}…`;
+            bar.style.width = `${Math.round((i / total) * 100)}%`;
 
-        try {
-            const body = new URLSearchParams({ id, _csrf: CSRF_TOKEN, action: 'run_one' });
-            const resp = await fetch(SCRAPE_URL, { method: 'POST', body });
-            const data = await resp.json();
+            try {
+                const body = new URLSearchParams({
+                    id,
+                    _csrf: CSRF_TOKEN,
+                    action: 'run_one'
+                });
+                const resp = await fetch(SCRAPE_URL, {
+                    method: 'POST',
+                    body
+                });
+                const data = await resp.json();
 
-            const cls      = data.status === 'ok' ? 'text-success' : 'text-warning';
-            const priceStr = data.price ? ` — Rs ${Number(data.price).toLocaleString()}` : '';
-            log.innerHTML += `<div class="${cls}">${label}${priceStr} <span class="text-muted">${data.message || ''}</span></div>`;
-            log.scrollTop = log.scrollHeight;
+                const cls = data.status === 'ok' ? 'text-success' : 'text-warning';
+                const priceStr = data.price ? ` — Rs ${Number(data.price).toLocaleString()}` : '';
+                log.innerHTML += `<div class="${cls}">${label}${priceStr} <span class="text-muted">${data.message || ''}</span></div>`;
+                log.scrollTop = log.scrollHeight;
 
-            if (data.status === 'ok') ok++; else fail++;
-        } catch (e) {
-            log.innerHTML += `<div class="text-danger">${label} — network error: ${e.message}</div>`;
-            fail++;
+                if (data.status === 'ok') ok++;
+                else fail++;
+            } catch (e) {
+                log.innerHTML += `<div class="text-danger">${label} — network error: ${e.message}</div>`;
+                fail++;
+            }
+
+            // Polite pause between requests (same as cron)
+            await new Promise(r => setTimeout(r, 300));
         }
 
-        // Polite pause between requests (same as cron)
-        await new Promise(r => setTimeout(r, 300));
+        bar.style.width = '100%';
+        bar.classList.remove('bg-primary');
+        bar.classList.add(fail > 0 ? 'bg-warning' : 'bg-success');
+        status.textContent = `Done! ✅ ${ok} updated, ⚠️ ${fail} issues.`;
+        count.textContent = `${total} / ${total}`;
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Run all now';
+
+        // Reload page after 2 s so table statuses refresh
+        setTimeout(() => location.reload(), 2000);
     }
-
-    bar.style.width = '100%';
-    bar.classList.remove('bg-primary');
-    bar.classList.add(fail > 0 ? 'bg-warning' : 'bg-success');
-    status.textContent = `Done! ✅ ${ok} updated, ⚠️ ${fail} issues.`;
-    count.textContent  = `${total} / ${total}`;
-    btn.disabled = false;
-    btn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Run all now';
-
-    // Reload page after 2 s so table statuses refresh
-    setTimeout(() => location.reload(), 2000);
-}
 </script>
 
 <?php require_once __DIR__ . '/footer.php'; ?>

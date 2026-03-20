@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Auto price scraper helpers - compare.lk
  *
@@ -14,11 +15,13 @@
  */
 
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/http_client.php';
 
 /**
  * Create scraper tables if they do not exist.
  */
-function ensureScraperTables(PDO $pdo): void {
+function ensureScraperTables(PDO $pdo): void
+{
     $pdo->exec("
         CREATE TABLE IF NOT EXISTS product_store_links (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -47,10 +50,11 @@ function ensureScraperTables(PDO $pdo): void {
  *
  * @return float|null  Price in LKR or null if no pattern matched.
  */
-function extractPriceFromHtml(string $html): ?float {
+function extractPriceFromHtml(string $html): ?float
+{
 
     // ── Strategy 0: Store-specific Exact Selectors ─────────────────────────────
-    
+
     // Daraz: pdp-price or pdt_price JS variable
     if (preg_match('/"pdt_price"\s*:\s*"([\d,]+(?:\.\d{1,2})?)"/is', $html, $m)) {
         return (float) str_replace(',', '', $m[1]);
@@ -77,7 +81,7 @@ function extractPriceFromHtml(string $html): ?float {
     if (preg_match('/class="special-price"[^>]*>.*?(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
         return (float) str_replace(',', '', $m[1]);
     }
-    
+
     // BuyAbans: sale-price or just price (excluding was-price)
     if (preg_match('/class="[^"]*(?:sale-price|current-price)[^"]*"[^>]*>\s*(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/i', $html, $m)) {
         return (float) str_replace(',', '', $m[1]);
@@ -161,10 +165,22 @@ function extractPriceFromHtml(string $html): ?float {
         $candidates = [];
         // Keywords that indicate a price is part of bank/installment/BNPL plan text
         $installmentKeywords = [
-            'payment plan', 'installment', 'transactions over', 'transactions between',
-            'transactions from', 'emi', 'monthly', 'per month', 'easy payment',
-            'applies to', 'apply to', 'eligible for', 'koko', 'buy now pay later',
-            'split into', 'pay in',
+            'payment plan',
+            'installment',
+            'transactions over',
+            'transactions between',
+            'transactions from',
+            'emi',
+            'monthly',
+            'per month',
+            'easy payment',
+            'applies to',
+            'apply to',
+            'eligible for',
+            'koko',
+            'buy now pay later',
+            'split into',
+            'pay in',
         ];
         foreach ($matches[1] as $match) {
             $raw    = $match[0];
@@ -205,7 +221,8 @@ function extractPriceFromHtml(string $html): ?float {
  * Extract the original / was-price from HTML (before discount).
  * Returns price as float or null if not found.
  */
-function extractOriginalPriceFromHtml(string $html, float $actualPrice): ?float {
+function extractOriginalPriceFromHtml(string $html, float $actualPrice): ?float
+{
     // Store-specific Exact Selectors
     // Daraz: old-price or originalPrice JSON
     if (preg_match('/"originalPrice"\s*:\s*"([\d,]+(?:\.\d{1,2})?)"/is', $html, $m)) {
@@ -222,7 +239,7 @@ function extractOriginalPriceFromHtml(string $html, float $actualPrice): ?float 
         $val = (float) str_replace(',', '', $m[1]);
         if ($val > $actualPrice) return $val;
     }
-    
+
     // Singer: old-price
     if (preg_match('/class="old-price"[^>]*>.*?(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
         $val = (float) str_replace(',', '', $m[1]);
@@ -273,10 +290,22 @@ function extractOriginalPriceFromHtml(string $html, float $actualPrice): ?float 
     // plan amounts, and pick the smallest value above the sale price.
     if (preg_match_all('/\b(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/i', $html, $matches, PREG_OFFSET_CAPTURE)) {
         $installmentKeywords = [
-            'payment plan', 'installment', 'transactions over', 'transactions between',
-            'transactions from', 'emi', 'monthly', 'per month', 'easy payment',
-            'applies to', 'apply to', 'eligible for', 'koko', 'buy now pay later',
-            'split into', 'pay in',
+            'payment plan',
+            'installment',
+            'transactions over',
+            'transactions between',
+            'transactions from',
+            'emi',
+            'monthly',
+            'per month',
+            'easy payment',
+            'applies to',
+            'apply to',
+            'eligible for',
+            'koko',
+            'buy now pay later',
+            'split into',
+            'pay in',
         ];
         $wasCandidates = [];
         foreach ($matches[1] as $match) {
@@ -319,7 +348,8 @@ function extractOriginalPriceFromHtml(string $html, float $actualPrice): ?float 
  * @param array $link Row from product_store_links (associative).
  * @return array ['status' => 'ok|no_price|error', 'message' => string, 'price' => ?float]
  */
-function scrapeProductStoreLink(PDO $pdo, array $link): array {
+function scrapeProductStoreLink(PDO $pdo, array $link): array
+{
     $url = $link['product_url'];
     $result = ['status' => 'error', 'message' => '', 'price' => null];
 
@@ -336,14 +366,15 @@ function scrapeProductStoreLink(PDO $pdo, array $link): array {
     // on Windows/WAMP and can allow a stalled connection to hang indefinitely.
     // CURLOPT_CONNECTTIMEOUT and CURLOPT_TIMEOUT are honoured rock-solidly.
     $ch = curl_init($url);
+    $verifyTls = function_exists('shouldVerifyTls') ? shouldVerifyTls() : true;
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_MAXREDIRS      => 5,
         CURLOPT_CONNECTTIMEOUT => 8,   // abort if we can't connect within 8 s
         CURLOPT_TIMEOUT        => 20,  // abort the whole transfer after 20 s
-        CURLOPT_SSL_VERIFYPEER => false,
-        CURLOPT_SSL_VERIFYHOST => false,
+        CURLOPT_SSL_VERIFYPEER => $verifyTls,
+        CURLOPT_SSL_VERIFYHOST => $verifyTls ? 2 : 0,
         CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         CURLOPT_ENCODING       => '',  // handle gzip/deflate automatically
     ]);
@@ -365,11 +396,11 @@ function scrapeProductStoreLink(PDO $pdo, array $link): array {
         // to fully establish the session before the specific product URL works.
         $cookieHeader = "Cookie: $cookieName=$cookieVal";
         curl_setopt($ch, CURLOPT_HTTPHEADER, [$cookieHeader]);
-        
+
         // Initial "activation" hit
         curl_setopt($ch, CURLOPT_URL, "https://mysoftlogic.lk/");
         curl_exec($ch);
-        
+
         // Final hit back to product URL
         curl_setopt($ch, CURLOPT_URL, $url);
         $html = curl_exec($ch);

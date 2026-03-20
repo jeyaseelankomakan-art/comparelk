@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Global Helper Functions - compare.lk
  */
@@ -36,6 +37,16 @@ function csrf_verify(): bool
     $sent = $_POST['_csrf'] ?? '';
     $expected = $_SESSION['_csrf'] ?? '';
     return is_string($sent) && is_string($expected) && $sent !== '' && hash_equals($expected, $sent);
+}
+
+/**
+ * Whether outgoing cURL requests should verify TLS certificates.
+ * Set COMPARE_INSECURE_TLS=1 only for temporary local debugging.
+ */
+function shouldVerifyTls(): bool
+{
+    $insecure = strtolower(trim((string) (getenv('COMPARE_INSECURE_TLS') ?: '')));
+    return !in_array($insecure, ['1', 'true', 'yes', 'on'], true);
 }
 
 /**
@@ -165,12 +176,13 @@ function searchProducts(string $keyword, ?int $categoryId = null, ?float $minPri
         $params[] = $maxPrice;
     }
 
-    $orderBy = match ($sort) {
-        'price_asc' => 'min_price ASC',
-        'relevance' => 'p.created_at DESC, p.id DESC', // Default to latest for relevance
-        'latest' => 'p.created_at DESC, p.id DESC',
-        default => 'p.created_at DESC, p.id DESC', // Default to latest
-    };
+    if ($sort === 'price_asc') {
+        $orderBy = 'min_price ASC';
+    } elseif ($sort === 'relevance' || $sort === 'latest') {
+        $orderBy = 'p.created_at DESC, p.id DESC';
+    } else {
+        $orderBy = 'p.created_at DESC, p.id DESC';
+    }
     $having = count($havingClauses) ? 'HAVING ' . implode(' AND ', $havingClauses) : '';
 
     $sql = "
@@ -267,30 +279,44 @@ function redirect(string $url): void
  */
 function stockBadge(string $status): string
 {
-    $label = function_exists('t') ? match ($status) {
-        'in_stock' => t('in_stock'),
-        'out_of_stock' => t('out_of_stock'),
-        'limited' => t('limited'),
-        default => 'Unknown',
-    } : match ($status) {
-        'in_stock' => 'In Stock',
-        'out_of_stock' => 'Out of Stock',
-        'limited' => 'Limited',
-        default => 'Unknown',
-    };
-    $class = match ($status) {
-        'in_stock' => 'badge bg-success',
-        'out_of_stock' => 'badge bg-danger',
-        'limited' => 'badge bg-warning text-dark',
-        default => 'badge bg-secondary',
-    };
+    if (function_exists('t')) {
+        if ($status === 'in_stock') {
+            $label = t('in_stock');
+        } elseif ($status === 'out_of_stock') {
+            $label = t('out_of_stock');
+        } elseif ($status === 'limited') {
+            $label = t('limited');
+        } else {
+            $label = 'Unknown';
+        }
+    } else {
+        if ($status === 'in_stock') {
+            $label = 'In Stock';
+        } elseif ($status === 'out_of_stock') {
+            $label = 'Out of Stock';
+        } elseif ($status === 'limited') {
+            $label = 'Limited';
+        } else {
+            $label = 'Unknown';
+        }
+    }
+
+    if ($status === 'in_stock') {
+        $class = 'badge bg-success';
+    } elseif ($status === 'out_of_stock') {
+        $class = 'badge bg-danger';
+    } elseif ($status === 'limited') {
+        $class = 'badge bg-warning text-dark';
+    } else {
+        $class = 'badge bg-secondary';
+    }
     return '<span class="' . $class . '">' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</span>';
 }
 
 /**
  * Upload product image
  */
-function uploadProductImage(array $file): string|false
+function uploadProductImage(array $file)
 {
     $uploadDir = __DIR__ . '/../uploads/products/';
     if (!is_dir($uploadDir))
@@ -305,13 +331,17 @@ function uploadProductImage(array $file): string|false
     if ($file['size'] > 5 * 1024 * 1024)
         return false;
 
-    $ext = match ($mime) {
-        'image/jpeg' => 'jpg',
-        'image/png' => 'png',
-        'image/gif' => 'gif',
-        'image/webp' => 'webp',
-        default => 'jpg',
-    };
+    if ($mime === 'image/jpeg') {
+        $ext = 'jpg';
+    } elseif ($mime === 'image/png') {
+        $ext = 'png';
+    } elseif ($mime === 'image/gif') {
+        $ext = 'gif';
+    } elseif ($mime === 'image/webp') {
+        $ext = 'webp';
+    } else {
+        $ext = 'jpg';
+    }
     $filename = uniqid('prod_') . '.' . $ext;
     $dest = $uploadDir . $filename;
 
@@ -324,7 +354,7 @@ function uploadProductImage(array $file): string|false
 /**
  * Upload store logo
  */
-function uploadStoreLogo(array $file): string|false
+function uploadStoreLogo(array $file)
 {
     $uploadDir = __DIR__ . '/../uploads/stores/';
     if (!is_dir($uploadDir))
@@ -333,20 +363,23 @@ function uploadStoreLogo(array $file): string|false
     // Use finfo for reliable MIME detection
     $finfo = new finfo(FILEINFO_MIME_TYPE);
     $mime = $finfo->file($file['tmp_name']);
-    $allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
+    $allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
     if (!in_array($mime, $allowed))
         return false;
     if ($file['size'] > 2 * 1024 * 1024)
         return false;
 
-    $ext = match ($mime) {
-        'image/jpeg' => 'jpg',
-        'image/png' => 'png',
-        'image/gif' => 'gif',
-        'image/webp' => 'webp',
-        'image/svg+xml' => 'svg',
-        default => 'png',
-    };
+    if ($mime === 'image/jpeg') {
+        $ext = 'jpg';
+    } elseif ($mime === 'image/png') {
+        $ext = 'png';
+    } elseif ($mime === 'image/gif') {
+        $ext = 'gif';
+    } elseif ($mime === 'image/webp') {
+        $ext = 'webp';
+    } else {
+        $ext = 'png';
+    }
     $filename = uniqid('store_') . '.' . $ext;
     $dest = $uploadDir . $filename;
 
