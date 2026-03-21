@@ -165,8 +165,8 @@ $hasLogo = file_exists($logoPath);
                     <input type="text" name="q" class="form-control"
                         placeholder="<?= e(t('search_placeholder_short')) ?>"
                         value="<?= isset($_GET['q']) ? e($_GET['q']) : '' ?>">
-                    <button class="btn" style="background:var(--primary);color:#fff;border-color:var(--primary);"
-                        type="submit"><i class="bi bi-search"></i></button>
+                    <button class="btn" style="background:var(--primary);color:#fff;border-color:var(--primary);white-space:nowrap;"
+                        type="submit"><i class="bi bi-search me-1"></i><?= e(t('nav_search')) ?></button>
                 </div>
             </form>
         </div>

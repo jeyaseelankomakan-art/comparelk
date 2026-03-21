@@ -1228,6 +1228,43 @@ body.theme-dark .hero-search-input {
     .trust-grid {
         grid-template-columns: 1fr;
     }
+
+    /* Hero search: stack vertically so Search button is always visible */
+    .hero-search-inner {
+        flex-wrap: wrap;
+        gap: .5rem;
+        padding: .6rem .6rem;
+        border-radius: 14px;
+    }
+
+    .hero-search-icon {
+        display: none;
+    }
+
+    .hero-search-input {
+        flex: 1 1 100%;
+        padding: .5rem .25rem;
+        min-width: 0;
+    }
+
+    .hero-search-btn {
+        flex: 1 1 100%;
+        border-radius: 10px;
+        padding: .7rem 1rem;
+        text-align: center;
+        justify-content: center;
+        display: flex;
+        align-items: center;
+        gap: .4rem;
+    }
+}
+
+@media (max-width: 768px) and (min-width: 481px) {
+    /* On medium-small screens keep inline but shrink padding */
+    .hero-search-btn {
+        padding: .65rem 1rem;
+        font-size: .85rem;
+    }
 }
 </style>
 
