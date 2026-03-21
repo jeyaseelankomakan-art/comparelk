@@ -54,7 +54,7 @@ $hasLogo = file_exists($logoPath);
     </script>
 
     <!-- Top Bar (language + location) -->
-    <div class="topbar">
+    <div class="topbar d-none d-md-block">
         <div class="container">
             <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 py-1">
                 <span><i class="bi bi-lightning-charge-fill text-warning me-1"></i> <?= e(t('topbar_msg')) ?></span>
@@ -159,13 +159,13 @@ $hasLogo = file_exists($logoPath);
 
     <!-- Mobile Search -->
     <div class="mobile-search d-lg-none">
-        <div class="container py-2">
+        <div class="container py-1">
             <form action="<?= url('search.php') ?>" method="GET">
-                <div class="input-group">
+                <div class="input-group input-group-sm">
                     <input type="text" name="q" class="form-control"
                         placeholder="<?= e(t('search_placeholder_short')) ?>"
                         value="<?= isset($_GET['q']) ? e($_GET['q']) : '' ?>">
-                    <button class="btn" style="background:var(--primary);color:#fff;border-color:var(--primary);white-space:nowrap;"
+                    <button class="btn btn-sm" style="background:var(--primary);color:#fff;border-color:var(--primary);white-space:nowrap;"
                         type="submit"><i class="bi bi-search me-1"></i><?= e(t('nav_search')) ?></button>
                 </div>
             </form>

@@ -911,6 +911,29 @@ img {
         padding: .4rem .7rem;
         font-size: .8rem;
     }
+
+    /* Compact navbar on mobile */
+    #mainNav {
+        padding: .2rem 0;
+    }
+
+    .site-logo-img {
+        height: 28px;
+    }
+
+    .site-logo-img-footer {
+        height: 28px;
+    }
+
+    .navbar-toggler {
+        padding: .2rem .45rem;
+        font-size: .9rem;
+    }
+
+    .topbar {
+        font-size: .72rem;
+        padding: .2rem 0;
+    }
 }
 
 /* Scroll to Top */
