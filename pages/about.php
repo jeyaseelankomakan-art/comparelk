@@ -12,7 +12,7 @@ require_once __DIR__ . '/../includes/header.php';
     <div class="container">
         <nav aria-label="breadcrumb">
             <ol class="breadcrumb">
-                <li class="breadcrumb-item"><a href="<?= url('') ?>"><i class="bi bi-house-fill"></i></a></li>
+                <li class="breadcrumb-item"><a href="<?= url('index.php') ?>"><i class="bi bi-house-fill"></i></a></li>
                 <li class="breadcrumb-item active"><?= e(t('about_us')) ?></li>
             </ol>
         </nav>
@@ -98,7 +98,7 @@ require_once __DIR__ . '/../includes/header.php';
                     style="background:var(--primary);color:#fff;border-color:var(--primary);">
                     <i class="bi bi-envelope me-2"></i><?= e(t('contact_us')) ?>
                 </a>
-                <a href="<?= url('') ?>" class="btn"
+                <a href="<?= url('index.php') ?>" class="btn"
                     style="color:var(--primary);border-color:var(--primary);background:transparent;">
                     <i class="bi bi-search me-2"></i><?= e(t('start_comparing')) ?>
                 </a>

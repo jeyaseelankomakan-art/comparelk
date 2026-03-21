@@ -246,7 +246,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div class="text-center mt-4 d-flex flex-column gap-2">
             <a href="<?= url('admin/dashboard.php') ?>" class="text-primary small fw-600">Go to Admin Dashboard (if
                 already logged in)</a>
-            <a href="<?= url('') ?>" class="text-muted" style="font-size:.8rem;">
+            <a href="<?= url('index.php') ?>" class="text-muted" style="font-size:.8rem;">
                 <i class="bi bi-arrow-left me-1"></i><?= e(t('back_to_site')) ?>
             </a>
         </div>

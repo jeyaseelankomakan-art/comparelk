@@ -13,7 +13,7 @@ $footerHasLogo = file_exists($footerLogoPath);
         <div class="row g-4">
             <div class="col-lg-4">
                 <div class="footer-brand mb-3">
-                    <a href="<?= url('') ?>" class="d-flex align-items-center text-decoration-none">
+                    <a href="<?= url('index.php') ?>" class="d-flex align-items-center text-decoration-none">
                         <?php if ($footerHasLogo): ?>
                             <img src="<?= url('assets/img/logo.png') ?>" alt="compare.lk"
                                 class="site-logo-img site-logo-img-footer">
@@ -51,7 +51,7 @@ $footerHasLogo = file_exists($footerLogoPath);
             <div class="col-lg-2 col-md-4">
                 <h6 class="footer-heading"><?= e(t('footer_quick_links')) ?></h6>
                 <ul class="footer-links">
-                    <li><a href="<?= url('') ?>"><i class="bi bi-house me-1"></i><?= e(t('footer_home')) ?></a></li>
+                    <li><a href="<?= url('index.php') ?>"><i class="bi bi-house me-1"></i><?= e(t('footer_home')) ?></a></li>
                     <li><a href="<?= url('search.php') ?>"><i
                                 class="bi bi-search me-1"></i><?= e(t('footer_search')) ?></a></li>
                     <li><a href="<?= url('pages/about.php') ?>"><i

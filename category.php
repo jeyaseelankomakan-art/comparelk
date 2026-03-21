@@ -31,7 +31,7 @@ require_once 'includes/header.php';
     <div class="container">
         <nav aria-label="breadcrumb">
             <ol class="breadcrumb">
-                <li class="breadcrumb-item"><a href="<?= url('') ?>"><i class="bi bi-house-fill"></i></a></li>
+                <li class="breadcrumb-item"><a href="<?= url('index.php') ?>"><i class="bi bi-house-fill"></i></a></li>
                 <li class="breadcrumb-item active"><?= e($category['name']) ?></li>
             </ol>
         </nav>
@@ -82,7 +82,7 @@ require_once 'includes/header.php';
             <div class="empty-state-icon"><i class="bi bi-box-seam"></i></div>
             <h5>No products in this category yet</h5>
             <p class="text-muted">Check back soon or browse other categories.</p>
-            <a href="<?= url('') ?>" class="btn"
+            <a href="<?= url('index.php') ?>" class="btn"
                 style="background:var(--primary);color:#fff;border-radius:12px;font-weight:600;padding:.65rem 1.5rem;">
                 <i class="bi bi-house me-2"></i><?= e(t('go_home')) ?>
             </a>

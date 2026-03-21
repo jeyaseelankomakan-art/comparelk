@@ -43,7 +43,7 @@ require_once 'includes/header.php';
     <div class="container">
         <nav aria-label="breadcrumb">
             <ol class="breadcrumb">
-                <li class="breadcrumb-item"><a href="<?= url('') ?>"><i class="bi bi-house-fill"></i></a></li>
+                <li class="breadcrumb-item"><a href="<?= url('index.php') ?>"><i class="bi bi-house-fill"></i></a></li>
                 <li class="breadcrumb-item"><a
                         href="<?= url('category.php?slug=' . urlencode($product['category_slug'])) ?>"><?= e($product['category_name']) ?></a>
                 </li>

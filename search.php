@@ -35,7 +35,7 @@ $allCats = getCategories();
     <div class="container">
         <nav aria-label="breadcrumb">
             <ol class="breadcrumb">
-                <li class="breadcrumb-item"><a href="<?= url('') ?>"><i class="bi bi-house-fill"></i></a></li>
+                <li class="breadcrumb-item"><a href="<?= url('index.php') ?>"><i class="bi bi-house-fill"></i></a></li>
                 <li class="breadcrumb-item active"><?= e(t('footer_search')) ?></li>
             </ol>
         </nav>
@@ -143,7 +143,7 @@ $allCats = getCategories();
                     <h5>No results for "<?= e($q) ?>"</h5>
                     <p class="text-muted">You will be redirected to the contact page...</p>
                     <script>window.location.href = "<?= url('pages/contact.php') ?>"; </script>
-                    <a href="<?= url('') ?>" class="btn"
+                    <a href="<?= url('index.php') ?>" class="btn"
                         style="background:var(--primary);color:#fff;border-color:var(--primary);font-weight:600;border-radius:12px;padding:.65rem 1.5rem;">
                         <i class="bi bi-grid me-2"></i>Browse Categories
                     </a>

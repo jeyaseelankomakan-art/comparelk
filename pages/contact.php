@@ -40,7 +40,7 @@ require_once __DIR__ . '/../includes/header.php';
     <div class="container">
         <nav aria-label="breadcrumb">
             <ol class="breadcrumb">
-                <li class="breadcrumb-item"><a href="<?= url('') ?>"><i class="bi bi-house-fill"></i></a></li>
+                <li class="breadcrumb-item"><a href="<?= url('index.php') ?>"><i class="bi bi-house-fill"></i></a></li>
                 <li class="breadcrumb-item active"><?= e(t('contact_us')) ?></li>
             </ol>
         </nav>

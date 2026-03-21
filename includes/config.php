@@ -33,5 +33,6 @@ if (!defined('BASE_PATH')) {
 function url(string $path = ''): string {
     $base = rtrim(BASE_PATH, '/');
     $path = ltrim($path, '/');
-    return $base . ($path ? '/' . $path : '');
+    $url = $base . ($path ? '/' . $path : '');
+    return $url === '' ? '/' : $url;
 }

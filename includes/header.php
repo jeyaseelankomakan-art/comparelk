@@ -69,7 +69,7 @@ $hasLogo = file_exists($logoPath);
     <!-- Main Navigation -->
     <nav class="navbar navbar-expand-lg navbar-light sticky-top" id="mainNav">
         <div class="container">
-            <a class="navbar-brand d-flex align-items-center" href="<?= url('') ?>">
+            <a class="navbar-brand d-flex align-items-center" href="<?= url('index.php') ?>">
                 <?php if ($hasLogo): ?>
                     <img src="<?= url('assets/img/logo.png') ?>" alt="compare.lk" class="site-logo-img">
                 <?php else: ?>

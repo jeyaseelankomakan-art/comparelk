@@ -112,7 +112,7 @@ $adminUser = $_SESSION['admin_username'] ?? 'Admin';
                         </a>
 
                         <span class="nav-section-label"><?= e(t('admin_site')) ?></span>
-                        <a href="<?= url('') ?>" target="_blank" class="sidebar-link">
+                        <a href="<?= url('index.php') ?>" target="_blank" class="sidebar-link">
                             <i class="bi bi-box-arrow-up-right"></i> <?= e(t('admin_view_site')) ?>
                         </a>
                 </nav>
@@ -186,7 +186,7 @@ $adminUser = $_SESSION['admin_username'] ?? 'Admin';
                         </button>
 
                         <!-- View site -->
-                        <a href="<?= url('') ?>" target="_blank"
+                        <a href="<?= url('index.php') ?>" target="_blank"
                             class="btn btn-sm btn-outline-secondary d-none d-md-inline-flex">
                             <i class="bi bi-arrow-up-right-square"></i> <span>View Site</span>
                         </a>
