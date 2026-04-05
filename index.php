@@ -1015,7 +1015,7 @@ body.theme-dark .cat-card {
     color: var(--text-primary);
 }
 
-}
+
 
 html[data-theme="dark"] .store-chip-card,
 body.theme-dark .store-chip-card {
@@ -1112,6 +1112,7 @@ body.theme-dark .hero-search-input {
 }
 
 @media (max-width: 768px) and (min-width: 481px) {
+
     /* On medium-small screens keep inline but shrink padding */
     .hero-search-btn {
         padding: .65rem 1rem;
