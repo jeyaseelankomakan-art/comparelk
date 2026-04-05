@@ -58,8 +58,8 @@ $footerHasLogo = file_exists($footerLogoPath);
                                 class="bi bi-info-circle me-1"></i><?= e(t('footer_about')) ?></a></li>
                     <li><a href="<?= url('pages/contact.php') ?>"><i
                                 class="bi bi-envelope me-1"></i><?= e(t('footer_contact')) ?></a></li>
-                    <li><a href="<?= url('admin/login.php') ?>"><i class="bi bi-lock me-1"></i><?= e(t('admin')) ?> /
-                            Dashboard</a></li>
+                    <!-- <li><a href="<?= url('admin/login.php') ?>"><i class="bi bi-lock me-1"></i><?= e(t('admin')) ?> /
+                            Dashboard</a></li> -->
                 </ul>
             </div>
             <div class="col-lg-4 col-md-4">
@@ -81,7 +81,7 @@ $footerHasLogo = file_exists($footerLogoPath);
         <div class="footer-bottom mt-4 pt-3">
             <div class="row align-items-center">
                 <div class="col-md-6 text-center text-md-start">
-                    <p class="mb-0">&copy; <?= date('Y') ?> <strong>compare.lk</strong> —
+                    <p class="mb-0"><a href="<?= url('admin/login.php') ?>" style="color: inherit; text-decoration: none;" title="">&copy;</a> <?= date('Y') ?> <strong>compare.lk</strong> —
                         <?= e(t('footer_copyright')) ?>
                     </p>
                 </div>

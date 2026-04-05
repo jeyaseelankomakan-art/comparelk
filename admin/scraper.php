@@ -109,6 +109,7 @@ if ($fetchUrl !== '') {
             'connect_timeout' => 8,
             'max_redirs' => 5,
             'encoding' => '',
+            'bypass_waf' => true,
         ]);
         $html = $fetch['body'];
         $httpCode = $fetch['http_code'];
@@ -136,8 +137,8 @@ if ($fetchUrl !== '') {
 
             // Use the same smart extractor as the auto-scraper so the
             // pre-filled price field always matches what the cron job saves.
-            $detectedPrice    = extractPriceFromHtml($html);
-            $detectedOriginal = $detectedPrice ? extractOriginalPriceFromHtml($html, $detectedPrice) : null;
+            $detectedPrice    = extractPriceFromHtml($html, $fetchUrl);
+            $detectedOriginal = $detectedPrice ? extractOriginalPriceFromHtml($html, $detectedPrice, $fetchUrl) : null;
 
             $isFetched = true;
             $result = [
@@ -146,6 +147,7 @@ if ($fetchUrl !== '') {
                 'prices'     => $prices,
                 'firstPrice' => $detectedPrice,
                 'origPrice'  => $detectedOriginal,
+                'bypassed'   => $fetch['bypassed'] ?? null,
             ];
         }
     }
@@ -323,6 +325,11 @@ $links = $linksStmt->fetchAll(PDO::FETCH_ASSOC);
                 </h6>
                 <?php if ($isFetched): ?>
                     <small class="text-muted"><?= number_format($result['length']) ?> bytes</small>
+                    <?php if (!empty($result['bypassed'])): ?>
+                        <span class="badge bg-warning text-dark ms-1" style="font-size:.65rem;" title="WAF challenge auto-solved">
+                            <i class="bi bi-shield-check me-1"></i><?= htmlspecialchars($result['bypassed']) ?>
+                        </span>
+                    <?php endif; ?>
                 <?php endif; ?>
             </div>
             <div class="form-card-body">

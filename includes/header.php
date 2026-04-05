@@ -148,10 +148,10 @@ $hasLogo = file_exists($logoPath);
                             <i class="bi bi-sun-fill" id="iconLight" aria-hidden="true"></i>
                         </button>
                     </li>
-                    <li class="nav-item">
+                    <!-- <li class="nav-item">
                         <a class="nav-link" href="<?= url('admin/login.php') ?>"><i
                                 class="bi bi-lock me-1"></i><?= e(t('admin')) ?></a>
-                    </li>
+                    </li> -->
                 </ul>
             </div>
         </div>

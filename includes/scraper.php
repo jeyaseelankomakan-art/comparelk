@@ -5,8 +5,8 @@
  *
  * This file defines:
  * - ensureScraperTables(PDO $pdo)
- * - extractPriceFromHtml(string $html): ?float
- * - extractOriginalPriceFromHtml(string $html, float $actualPrice): ?float
+ * - extractPriceFromHtml(string $html, string $sourceUrl): ?float
+ * - extractOriginalPriceFromHtml(string $html, float $actualPrice, string $sourceUrl): ?float
  * - scrapeProductStoreLink(PDO $pdo, array $link): array
  *
  * It is used by:
@@ -50,7 +50,7 @@ function ensureScraperTables(PDO $pdo): void
  *
  * @return float|null  Price in LKR or null if no pattern matched.
  */
-function extractPriceFromHtml(string $html): ?float
+function extractPriceFromHtml(string $html, string $sourceUrl = ''): ?float
 {
 
     // ── Strategy 0: Store-specific Exact Selectors ─────────────────────────────
@@ -63,55 +63,166 @@ function extractPriceFromHtml(string $html): ?float
         return (float) str_replace(',', '', $m[1]);
     }
 
-    // Softlogic: main-price OR discounted-price
-    if (preg_match('/class="[^"]*discounted-price[^"]*"[^>]*>\s*(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/i', $html, $m)) {
-        return (float) str_replace(',', '', $m[1]);
-    }
-    if (preg_match('/id="product-promotion-price"[^>]*>\s*(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
-        return (float) str_replace(',', '', $m[1]);
-    }
-    if (preg_match('/id="product-price"[^>]*>\s*(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
-        return (float) str_replace(',', '', $m[1]);
-    }
-    if (preg_match('/class="main-price"[^>]*>.*?(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
-        return (float) str_replace(',', '', $m[1]);
+    // ── Softlogic: data-product JSON (most reliable) ──────────────────────────
+    // Softlogic embeds product data as HTML-entity-encoded JSON inside
+    // data-product="..." attributes. The JSON contains:
+    //   - "promotionPrice" : current selling price
+    //   - "basePrice"      : original / list price
+    //   - "id"             : Softlogic product ID
+    //
+    // If the URL has /p/NNNNN, we validate that the product ID exists on the
+    // page. If it doesn't, the page was likely redirected to the homepage and
+    // any prices found would be for unrelated products (gift vouchers, etc.).
+    $isSoftlogic = (stripos($sourceUrl, 'softlogic') !== false);
+
+    if ($isSoftlogic) {
+        // Extract product ID from URL  e.g. /p/135085
+        $urlProductId = null;
+        if (preg_match('#/p/(\d+)#', $sourceUrl, $um)) {
+            $urlProductId = $um[1];
+        }
+
+        // Decode the HTML entities used in data-product attributes
+        $decoded = html_entity_decode($html, ENT_QUOTES, 'UTF-8');
+
+        // If we have a URL product ID, validate it exists in the page
+        if ($urlProductId !== null) {
+            $productExists = (
+                strpos($decoded, '"id":' . $urlProductId) !== false ||
+                strpos($decoded, '"id":"' . $urlProductId . '"') !== false ||
+                strpos($decoded, '"productID":"' . $urlProductId . '"') !== false ||
+                strpos($decoded, 'prod-icons_' . $urlProductId) !== false
+            );
+            if (!$productExists) {
+                // Page does not contain this product — likely a redirect to homepage.
+                // Return null to avoid extracting wrong prices from gift voucher cards.
+                return null;
+            }
+        }
+
+        // Try to find the specific product's data-product JSON block
+        if ($urlProductId !== null) {
+            // Look for the data-product JSON that contains this specific product ID
+            if (preg_match('/data-product="([^"]*?"id":\s*' . preg_quote($urlProductId, '/') . '\b[^"]*?)"/i', $decoded, $dpMatch)) {
+                $json = json_decode($dpMatch[1], true);
+                if ($json) {
+                    // promotionPrice is the current selling price
+                    $promoPrice = $json['promotionPrice'] ?? null;
+                    $basePrice  = $json['basePrice'] ?? null;
+                    $price = ($promoPrice && $promoPrice > 100) ? (float) $promoPrice : (($basePrice && $basePrice > 100) ? (float) $basePrice : null);
+                    if ($price) return $price;
+                }
+            }
+        }
+
+        // Fallback: find ALL data-product JSON blocks and pick the first valid one
+        if (preg_match_all('/data-product="([^"]+)"/i', $decoded, $dpMatches)) {
+            foreach ($dpMatches[1] as $dpRaw) {
+                $json = json_decode($dpRaw, true);
+                if (!$json || !isset($json['basePrice'])) continue;
+                $promoPrice = $json['promotionPrice'] ?? null;
+                $basePrice  = $json['basePrice'] ?? null;
+                $price = ($promoPrice && $promoPrice > 100) ? (float) $promoPrice : (($basePrice && $basePrice > 100) ? (float) $basePrice : null);
+                if ($price) return $price;
+            }
+        }
+
+        // Legacy CSS-class selectors (kept as final Softlogic fallbacks)
+        if (preg_match('/id="product-promotion-price"[^>]*>\s*(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
+            return (float) str_replace(',', '', $m[1]);
+        }
+        if (preg_match('/id="product-price"[^>]*>\s*(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
+            return (float) str_replace(',', '', $m[1]);
+        }
+        if (preg_match('/class="main-price"[^>]*>.*?(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
+            return (float) str_replace(',', '', $m[1]);
+        }
+        if (preg_match('/id="pd-info"[^>]*>.*?(?:class="product_price discount[^>]*>.*?<span[^>]*>|class="product_price[^>]*>)\s*(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
+            return (float) str_replace(',', '', $m[1]);
+        }
     }
 
     // Singer: special-price
-    if (preg_match('/class="special-price"[^>]*>.*?(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
+    $isSinger = (stripos($sourceUrl, 'singer') !== false);
+    if ($isSinger && preg_match('/class="special-price"[^>]*>.*?(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
         return (float) str_replace(',', '', $m[1]);
     }
 
-    // BuyAbans: sale-price or just price (excluding was-price)
-    if (preg_match('/class="[^"]*(?:sale-price|current-price)[^"]*"[^>]*>\s*(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/i', $html, $m)) {
-        return (float) str_replace(',', '', $m[1]);
+    // BuyAbans: extract price_convert from the HTML-entity-encoded inline JSON.
+    // BuyAbans embeds product data as JS inside large &quot;-encoded strings:
+    //   &quot;price_convert&quot;:329999,&quot;special_price_convert&quot;:0,...
+    // We HTML-decode once, then grab the FIRST non-zero price_convert value.
+    $isAbans = (stripos($sourceUrl, 'buyabans') !== false);
+    if ($isAbans) {
+        $abDecoded = html_entity_decode($html, ENT_QUOTES, 'UTF-8');
+        // special_price_convert is the SALE price when non-zero; price_convert is list price.
+        // Walk all occurrences and return the first value > 1000 (avoids Rs. 0 and tiny sums).
+        if (preg_match_all('/"(?:special_price_convert|price_convert)"\s*:\s*(\d+)/', $abDecoded, $abm)) {
+            // Collect non-zero special prices first, then list prices
+            $specials = [];
+            $lists    = [];
+            // Re-match with key name captured
+            if (preg_match_all('/"(special_price_convert|price_convert)"\s*:\s*(\d+)/', $abDecoded, $abk)) {
+                foreach ($abk[1] as $i => $key) {
+                    $val = (int) $abk[2][$i];
+                    if ($val <= 0) continue;
+                    if ($key === 'special_price_convert') $specials[] = $val;
+                    else                                   $lists[]    = $val;
+                }
+            }
+            // Prefer special (sale) price; fall back to list price
+            $abCandidates = array_merge($specials, $lists);
+            if (!empty($abCandidates)) {
+                // The first value is the primary product variant price
+                return (float) $abCandidates[0];
+            }
+        }
+    }
+
+    // BuyAbans CSS fallback: sale-price or current-price element (must be > 0)
+    if (preg_match('/class="[^"]*(?:sale-price|current-price|selling-price-de)[^"]*"[^>]*>\s*(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/i', $html, $m)) {
+        $val = (float) str_replace(',', '', $m[1]);
+        if ($val > 0) return $val;
     }
 
     // ── Strategy 1: JSON-LD "price" (most reliable) ───────────────────────────
     //
-    // Collect EVERY "price" occurrence in JSON-LD / JSON objects, then return
-    // the highest value above 100. This ensures that a small bank-offer amount
-    // (e.g. "price":500 for a card discount) never wins over the actual product
-    // price (e.g. "price":"42999").
+    // Parse structured JSON-LD objects explicitly to avoid mistakenly picking up
+    // shipping costs or randomly named JS variables that happen to use "price".
     $jsonLdCandidates = [];
 
-    // Quoted string form: "price":"42999.00"
-    if (preg_match_all('/"price"\s*:\s*"([\d,]+(?:\.\d{1,2})?)"/', $html, $m)) {
-        foreach ($m[1] as $v) {
-            $val = (float) str_replace(',', '', $v);
-            if ($val > 100) $jsonLdCandidates[] = $val;
+    if (preg_match_all('/<script[^>]*type=["\']application\/ld\+json["\'][^>]*>(.*?)<\/script>/is', $html, $scriptMatches)) {
+        foreach ($scriptMatches[1] as $jsonStr) {
+            $data = json_decode($jsonStr, true);
+            if (!$data) continue;
+
+            $graph = isset($data['@graph']) ? $data['@graph'] : [$data];
+            foreach ($graph as $obj) {
+                // Normalise @type to a lowercase string
+                $rawType = $obj['@type'] ?? '';
+                $type = is_array($rawType) ? strtolower((string)($rawType[0] ?? '')) : strtolower((string)$rawType);
+
+                // Only consider the main product object
+                if ($type === 'product') {
+                    $offers = $obj['offers'] ?? null;
+                    if ($offers) {
+                        $offerList = (is_array($offers) && !isset($offers['price']) && !isset($offers['lowPrice'])) ? $offers : [$offers];
+                        foreach ($offerList as $offer) {
+                            $p = $offer['price'] ?? $offer['lowPrice'] ?? null;
+                            if ($p && (float)$p > 100) {
+                                $jsonLdCandidates[] = (float) str_replace(',', '', (string)$p);
+                            }
+                        }
+                    } else if (isset($obj['price']) && (float)$obj['price'] > 100) {
+                        $jsonLdCandidates[] = (float) str_replace(',', '', (string)$obj['price']);
+                    }
+                }
+            }
         }
     }
-    // Unquoted numeric form: "price":42999
-    if (preg_match_all('/"price"\s*:\s*(\d+(?:\.\d{1,2})?)/', $html, $m)) {
-        foreach ($m[1] as $v) {
-            $val = (float) $v;
-            if ($val > 100) $jsonLdCandidates[] = $val;
-        }
-    }
+
     if (!empty($jsonLdCandidates)) {
-        // Lowest value wins: JSON-LD typically lists the current selling price as the
-        // lowest 'price' entry (the higher values are original/was-prices or delivery costs).
+        // If multiple variants exist, the lowest one is typically the "from" price
         return min($jsonLdCandidates);
     }
 
@@ -138,81 +249,9 @@ function extractPriceFromHtml(string $html): ?float
         if (!empty($candidates)) return max($candidates);
     }
 
-    // ── Strategy 4: Generic JS/JSON "price" key ───────────────────────────────
-    // Broader pattern that catches single-quoted keys and inline JS objects.
-    if (preg_match_all('/["\'](?:price|salePrice|sellingPrice)["\']\s*:\s*["\']?([\d,]+(?:\.\d{1,2})?)["\']?/i', $html, $matches)) {
-        $candidates = array_map(fn($v) => (float) str_replace(',', '', $v), $matches[1]);
-        $candidates = array_filter($candidates, fn($v) => $v > 100);
-        if (!empty($candidates)) {
-            // Most-frequent price wins, BUT if we only have 1 occurrence, assume MIN price is the current price (not max)
-            $freq = array_count_values(array_map('strval', $candidates));
-            arsort($freq);
-            $topFreq = reset($freq);
-            $topVal  = (float) array_key_first($freq);
-            return ($topFreq > 1) ? $topVal : min($candidates);
-        }
-    }
-
-    // ── Strategy 5: Rs./LKR text prices ──────────────────────────────────────
-    // Use a threshold of 1 000 to skip delivery fees, coupon amounts, etc.
-    //
-    // IMPORTANT: Many Sri Lankan store pages (especially BuyAbans) include bank
-    // installment plan eligibility text like "Easy payment plans from Sampath Bank
-    // apply to transactions over Rs 10,000". These Rs. amounts repeat once per bank
-    // and can outnumber the actual product price on the page. We filter them out by
-    // checking the surrounding context for installment/bank-related keywords.
-    if (preg_match_all('/\b(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/i', $html, $matches, PREG_OFFSET_CAPTURE)) {
-        $candidates = [];
-        // Keywords that indicate a price is part of bank/installment/BNPL plan text
-        $installmentKeywords = [
-            'payment plan',
-            'installment',
-            'transactions over',
-            'transactions between',
-            'transactions from',
-            'emi',
-            'monthly',
-            'per month',
-            'easy payment',
-            'applies to',
-            'apply to',
-            'eligible for',
-            'koko',
-            'buy now pay later',
-            'split into',
-            'pay in',
-        ];
-        foreach ($matches[1] as $match) {
-            $raw    = $match[0];
-            $offset = $match[1];
-            $num    = (float) str_replace([',', ' '], '', $raw);
-            if ($num <= 1000) continue;
-
-            // Grab ~200 chars before this match to check for installment-related context
-            $contextStart  = max(0, $offset - 200);
-            $contextBefore = strtolower(substr($html, $contextStart, $offset - $contextStart));
-            // Also decode HTML entities in the context (BuyAbans encodes its JS strings)
-            $contextBefore = html_entity_decode($contextBefore, ENT_QUOTES, 'UTF-8');
-
-            $isInstallment = false;
-            foreach ($installmentKeywords as $kw) {
-                if (strpos($contextBefore, $kw) !== false) {
-                    $isInstallment = true;
-                    break;
-                }
-            }
-            if ($isInstallment) continue;
-
-            $candidates[] = $num;
-        }
-        if (!empty($candidates)) {
-            // Use the FIRST candidate — on Sri Lankan product pages the current selling
-            // price always appears at the top, before repeated strikethrough/was prices.
-            // The frequency heuristic is unreliable because the original price often
-            // appears multiple times (price display, meta tags, structured data).
-            return $candidates[0];
-        }
-    }
+    // Strategies 4 and 5 (Generic JS price key and aggressive Rs. text scanning) 
+    // were removed to prevent false positives (like matching a Rs. 5000 Gift voucher)
+    // when a product page is out of stock or redirected. It is safer to return null.
 
     return null;
 }
@@ -221,7 +260,7 @@ function extractPriceFromHtml(string $html): ?float
  * Extract the original / was-price from HTML (before discount).
  * Returns price as float or null if not found.
  */
-function extractOriginalPriceFromHtml(string $html, float $actualPrice): ?float
+function extractOriginalPriceFromHtml(string $html, float $actualPrice, string $sourceUrl = ''): ?float
 {
     // Store-specific Exact Selectors
     // Daraz: old-price or originalPrice JSON
@@ -234,38 +273,94 @@ function extractOriginalPriceFromHtml(string $html, float $actualPrice): ?float
         if ($val > $actualPrice) return $val;
     }
 
-    // Softlogic: main-price-del
+    // Softlogic: data-product JSON — basePrice is the original when promotionPrice differs
+    $isSoftlogic = (stripos($sourceUrl, 'softlogic') !== false);
+    if ($isSoftlogic) {
+        $decoded = html_entity_decode($html, ENT_QUOTES, 'UTF-8');
+        $urlProductId = null;
+        if (preg_match('#/p/(\d+)#', $sourceUrl, $um)) {
+            $urlProductId = $um[1];
+        }
+        // Find the matching data-product JSON
+        $pattern = $urlProductId
+            ? '/data-product="([^"]*?"id":\s*' . preg_quote($urlProductId, '/') . '\b[^"]*?)"/i'
+            : '/data-product="([^"]+)"/i';
+        if (preg_match($pattern, $decoded, $dpMatch)) {
+            $json = json_decode($dpMatch[1], true);
+            if ($json) {
+                $basePrice = (float) ($json['basePrice'] ?? 0);
+                if ($basePrice > $actualPrice) return $basePrice;
+            }
+        }
+    }
+
+    // Softlogic: main-price-del (CSS fallback)
     if (preg_match('/class="main-price-del"[^>]*>.*?(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
+        $val = (float) str_replace(',', '', $m[1]);
+        if ($val > $actualPrice) return $val;
+    }
+    if (preg_match('/id="product-price"[^>]*>\s*(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
         $val = (float) str_replace(',', '', $m[1]);
         if ($val > $actualPrice) return $val;
     }
 
     // Singer: old-price
-    if (preg_match('/class="old-price"[^>]*>.*?(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
+    $isSinger = (stripos($sourceUrl, 'singer') !== false);
+    if ($isSinger && preg_match('/class="old-price"[^>]*>.*?(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
         $val = (float) str_replace(',', '', $m[1]);
         if ($val > $actualPrice) return $val;
     }
 
-    // BuyAbans: was-price
-    if (preg_match('/class="was-price"[^>]*>.*?(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
+    // BuyAbans CSS was-price fallback
+    $isAbans = (stripos($sourceUrl, 'buyabans') !== false);
+    if ($isAbans && preg_match('/class="[^"]*(?:was-price|cut-off|market-price-de)[^"]*"[^>]*>.*?(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/is', $html, $m)) {
         $val = (float) str_replace(',', '', $m[1]);
         if ($val > $actualPrice) return $val;
     }
 
-    // JSON-LD: look for "originalPrice", "regularPrice", "listPrice", "fullPrice"
-    $keys = ['originalPrice', 'regularPrice', 'listPrice', 'fullPrice', 'compareAtPrice', 'mrp_price'];
-    foreach ($keys as $key) {
-        if (preg_match('/"' . $key . '"\s*:\s*"?([\d.,]+)"?/i', $html, $m)) {
-            $val = (float) str_replace(',', '', $m[1]);
-            if ($val > $actualPrice) return $val;
+    // Parse structured JSON-LD objects explicitly to avoid mistakenly picking up
+    // background listPrices/regularPrices from non-visual Javascript data blobs
+    // (like Abans' underlying product JSON).
+    if (preg_match_all('/<script[^>]*type=["\']application\/ld\+json["\'][^>]*>(.*?)<\/script>/is', $html, $scriptMatches)) {
+        $jsonPrices = [];
+        foreach ($scriptMatches[1] as $jsonStr) {
+            $data = json_decode($jsonStr, true);
+            if (!$data) continue;
+
+            $graph = isset($data['@graph']) ? $data['@graph'] : [$data];
+            foreach ($graph as $obj) {
+                $rawType = $obj['@type'] ?? '';
+                $type = is_array($rawType) ? strtolower((string)($rawType[0] ?? '')) : strtolower((string)$rawType);
+
+                if ($type === 'product') {
+                    // Check for standard high-level MRVP properties
+                    $keys = ['originalPrice', 'regularPrice', 'listPrice', 'fullPrice', 'compareAtPrice', 'mrp_price'];
+                    foreach ($keys as $k) {
+                        if (isset($obj[$k])) {
+                            $val = (float) str_replace(',', '', (string)$obj[$k]);
+                            if ($val > $actualPrice) $jsonPrices[] = $val;
+                        }
+                    }
+
+                    // Look within offers array (e.g. WooCommerce/Singer)
+                    $offers = $obj['offers'] ?? null;
+                    if ($offers) {
+                        $offerList = (is_array($offers) && !isset($offers['price']) && !isset($offers['lowPrice'])) ? $offers : [$offers];
+                        foreach ($offerList as $offer) {
+                            $p = $offer['price'] ?? $offer['lowPrice'] ?? null;
+                            if ($p && (float)$p > $actualPrice) {
+                                $jsonPrices[] = (float) str_replace(',', '', (string)$p);
+                            }
+                        }
+                    } else if (isset($obj['price']) && (float)$obj['price'] > $actualPrice) {
+                        $jsonPrices[] = (float) str_replace(',', '', (string)$obj['price']);
+                    }
+                }
+            }
         }
-    }
-
-    // Singer-style: two JSON-LD prices where the larger one is the original
-    if (preg_match_all('/"price"\s*:\s*"?([\d.]+)"?/', $html, $m)) {
-        $prices = array_map('floatval', $m[1]);
-        $prices = array_filter($prices, fn($v) => $v > $actualPrice);
-        if (!empty($prices)) return min($prices);
+        if (!empty($jsonPrices)) {
+            return min($jsonPrices);
+        }
     }
 
     // HTML strikethrough patterns: <del>, <s>, .was-price, .original-price etc.
@@ -344,6 +439,9 @@ function extractOriginalPriceFromHtml(string $html, float $actualPrice): ?float
 /**
  * Scrape and update prices for a single product_store_links row.
  *
+ * Uses the shared httpFetch() helper which handles WAF bypasses (Zenedge,
+ * Cloudflare) automatically.
+ *
  * @param PDO   $pdo
  * @param array $link Row from product_store_links (associative).
  * @return array ['status' => 'ok|no_price|error', 'message' => string, 'price' => ?float]
@@ -362,73 +460,50 @@ function scrapeProductStoreLink(PDO $pdo, array $link): array
     // cannot exhaust the global max_execution_time for the entire scraper run.
     set_time_limit(60);
 
-    // Use cURL instead of file_get_contents — stream context 'timeout' is unreliable
-    // on Windows/WAMP and can allow a stalled connection to hang indefinitely.
-    // CURLOPT_CONNECTTIMEOUT and CURLOPT_TIMEOUT are honoured rock-solidly.
-    $ch = curl_init($url);
-    $verifyTls = function_exists('shouldVerifyTls') ? shouldVerifyTls() : true;
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_MAXREDIRS      => 5,
-        CURLOPT_CONNECTTIMEOUT => 8,   // abort if we can't connect within 8 s
-        CURLOPT_TIMEOUT        => 20,  // abort the whole transfer after 20 s
-        CURLOPT_SSL_VERIFYPEER => $verifyTls,
-        CURLOPT_SSL_VERIFYHOST => $verifyTls ? 2 : 0,
-        CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        CURLOPT_ENCODING       => '',  // handle gzip/deflate automatically
+    // Use shared HTTP client with built-in WAF bypass (Zenedge, Cloudflare)
+    $fetch = httpFetch($url, [
+        'timeout'         => 20,
+        'connect_timeout' => 8,
+        'max_redirs'      => 5,
+        'encoding'        => '',
+        'bypass_waf'      => true,
     ]);
 
-    $html     = curl_exec($ch);
-
-    // ── Bypass: Softlogic / Zenedge BOT challenge ────────────────────────────
-    // If the HTML is very short and contains the __zjc cookie challenge
-    if (strlen($html) < 2000 && strpos($html, '__zjc') !== false && preg_match('/var\s+v\s*=\s*([\d.]+)\s*\*\s*([\d.]+);/', $html, $m)) {
-        $v1 = (float)$m[1];
-        $v2 = (float)$m[2];
-        $cookieVal = floor($v1 * $v2);
-        $cookieName = 'zjc_session';
-        if (preg_match('/__zjc(\d+)/', $html, $cm)) {
-            $cookieName = '__zjc' . $cm[1];
-        }
-
-        // Apply cookie and re-fetch. Zenedge often requires hitting root or "/" first
-        // to fully establish the session before the specific product URL works.
-        $cookieHeader = "Cookie: $cookieName=$cookieVal";
-        curl_setopt($ch, CURLOPT_HTTPHEADER, [$cookieHeader]);
-
-        // Initial "activation" hit
-        curl_setopt($ch, CURLOPT_URL, "https://mysoftlogic.lk/");
-        curl_exec($ch);
-
-        // Final hit back to product URL
-        curl_setopt($ch, CURLOPT_URL, $url);
-        $html = curl_exec($ch);
-    }
-
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curlErr  = curl_error($ch);
-    curl_close($ch);
-
-    if ($html === false || !empty($curlErr)) {
-        $result['message'] = 'Fetch failed: ' . $curlErr;
+    if (!$fetch['ok']) {
+        $result['message'] = 'Fetch failed'
+            . (!empty($fetch['error']) ? ': ' . $fetch['error'] : " (HTTP {$fetch['http_code']})");
         return $result;
     }
 
-    if ($httpCode >= 400) {
-        $result['message'] = "HTTP $httpCode";
-        return $result;
-    }
+    $html = $fetch['body'];
 
-    $price = extractPriceFromHtml($html);
+    $price = extractPriceFromHtml($html, $url);
     if ($price === null) {
         $result['status']  = 'no_price';
         $result['message'] = 'No price pattern found';
+
+        // Explicitly update database to reflect out of stock / missing data
+        // otherwise UI will infinitely show ghost/stale prices
+        $productId = (int) $link['product_id'];
+        $storeId   = (int) $link['store_id'];
+
+        $pdo->prepare("
+            UPDATE product_prices
+            SET stock_status = 'out_of_stock', last_updated = NOW()
+            WHERE product_id = ? AND store_id = ?
+        ")->execute([$productId, $storeId]);
+
+        $pdo->prepare("
+            UPDATE product_store_links
+            SET last_status = 'no_price', last_error = ?, last_scraped_at = NOW()
+            WHERE id = ?
+        ")->execute([$result['message'], $link['id']]);
+
         return $result;
     }
 
     // Try to extract original (before-discount) price
-    $originalPrice = extractOriginalPriceFromHtml($html, $price);
+    $originalPrice = extractOriginalPriceFromHtml($html, $price, $url);
 
     $productId = (int) $link['product_id'];
     $storeId   = (int) $link['store_id'];
@@ -443,7 +518,12 @@ function scrapeProductStoreLink(PDO $pdo, array $link): array
 
         if ($existing) {
             $oldPrice = (float) $existing['price'];
-            if (abs($oldPrice - $price) > 0.009 || $originalPrice !== null) {
+            $oldOrig  = $existing['original_price'] !== null ? (float) $existing['original_price'] : null;
+            
+            // Trigger DB update if:
+            // 1. The main price changed
+            // 2. The original price changed (e.g. sale began, or sale ended)
+            if (abs($oldPrice - $price) > 0.009 || $originalPrice !== $oldOrig) {
                 // Log history only when actual price changed
                 if (abs($oldPrice - $price) > 0.009) {
                     $pdo->prepare("INSERT INTO price_history (product_id, store_id, price) VALUES (?, ?, ?)")
@@ -454,6 +534,10 @@ function scrapeProductStoreLink(PDO $pdo, array $link): array
                     SET price = ?, original_price = ?, stock_status = 'in_stock', last_updated = NOW()
                     WHERE id = ?
                 ")->execute([$price, $originalPrice, $existing['id']]);
+            } else {
+                // Even if no price diff, ensure it's marked 'in_stock' and bump updated time
+                $pdo->prepare("UPDATE product_prices SET stock_status = 'in_stock', last_updated = NOW() WHERE id = ?")
+                    ->execute([$existing['id']]);
             }
         } else {
             // Insert new record + history

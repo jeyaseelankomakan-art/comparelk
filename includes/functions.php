@@ -318,6 +318,10 @@ function stockBadge(string $status): string
  */
 function uploadProductImage(array $file)
 {
+    if (!isset($file['error']) || $file['error'] !== UPLOAD_ERR_OK || empty($file['tmp_name']) || !is_uploaded_file($file['tmp_name'])) {
+        return false;
+    }
+
     $uploadDir = __DIR__ . '/../uploads/products/';
     if (!is_dir($uploadDir))
         mkdir($uploadDir, 0755, true);
@@ -356,6 +360,10 @@ function uploadProductImage(array $file)
  */
 function uploadStoreLogo(array $file)
 {
+    if (!isset($file['error']) || $file['error'] !== UPLOAD_ERR_OK || empty($file['tmp_name']) || !is_uploaded_file($file['tmp_name'])) {
+        return false;
+    }
+
     $uploadDir = __DIR__ . '/../uploads/stores/';
     if (!is_dir($uploadDir))
         mkdir($uploadDir, 0755, true);
