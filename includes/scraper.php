@@ -209,12 +209,18 @@ function extractPriceFromHtml(string $html, string $sourceUrl = ''): ?float
                         $offerList = (is_array($offers) && !isset($offers['price']) && !isset($offers['lowPrice'])) ? $offers : [$offers];
                         foreach ($offerList as $offer) {
                             $p = $offer['price'] ?? $offer['lowPrice'] ?? null;
-                            if ($p && (float)$p > 100) {
-                                $jsonLdCandidates[] = (float) str_replace(',', '', (string)$p);
+                            if ($p) {
+                                $cleanedP = (float) preg_replace('/[^0-9.]/', '', (string)$p);
+                                if ($cleanedP > 100) {
+                                    $jsonLdCandidates[] = $cleanedP;
+                                }
                             }
                         }
-                    } else if (isset($obj['price']) && (float)$obj['price'] > 100) {
-                        $jsonLdCandidates[] = (float) str_replace(',', '', (string)$obj['price']);
+                    } else if (isset($obj['price'])) {
+                        $cleanedP = (float) preg_replace('/[^0-9.]/', '', (string)$obj['price']);
+                        if ($cleanedP > 100) {
+                            $jsonLdCandidates[] = $cleanedP;
+                        }
                     }
                 }
             }
@@ -337,7 +343,7 @@ function extractOriginalPriceFromHtml(string $html, float $actualPrice, string $
                     $keys = ['originalPrice', 'regularPrice', 'listPrice', 'fullPrice', 'compareAtPrice', 'mrp_price'];
                     foreach ($keys as $k) {
                         if (isset($obj[$k])) {
-                            $val = (float) str_replace(',', '', (string)$obj[$k]);
+                            $val = (float) preg_replace('/[^0-9.]/', '', (string)$obj[$k]);
                             if ($val > $actualPrice) $jsonPrices[] = $val;
                         }
                     }
@@ -348,12 +354,18 @@ function extractOriginalPriceFromHtml(string $html, float $actualPrice, string $
                         $offerList = (is_array($offers) && !isset($offers['price']) && !isset($offers['lowPrice'])) ? $offers : [$offers];
                         foreach ($offerList as $offer) {
                             $p = $offer['price'] ?? $offer['lowPrice'] ?? null;
-                            if ($p && (float)$p > $actualPrice) {
-                                $jsonPrices[] = (float) str_replace(',', '', (string)$p);
+                            if ($p) {
+                                $cleanedP = (float) preg_replace('/[^0-9.]/', '', (string)$p);
+                                if ($cleanedP > $actualPrice) {
+                                    $jsonPrices[] = $cleanedP;
+                                }
                             }
                         }
-                    } else if (isset($obj['price']) && (float)$obj['price'] > $actualPrice) {
-                        $jsonPrices[] = (float) str_replace(',', '', (string)$obj['price']);
+                    } else if (isset($obj['price'])) {
+                        $cleanedP = (float) preg_replace('/[^0-9.]/', '', (string)$obj['price']);
+                        if ($cleanedP > $actualPrice) {
+                            $jsonPrices[] = $cleanedP;
+                        }
                     }
                 }
             }
@@ -512,7 +524,7 @@ function scrapeProductStoreLink(PDO $pdo, array $link): array
         $pdo->beginTransaction();
 
         // Read current price if any
-        $stmt = $pdo->prepare("SELECT id, price FROM product_prices WHERE product_id = ? AND store_id = ? LIMIT 1");
+        $stmt = $pdo->prepare("SELECT id, price, original_price FROM product_prices WHERE product_id = ? AND store_id = ? LIMIT 1");
         $stmt->execute([$productId, $storeId]);
         $existing = $stmt->fetch(PDO::FETCH_ASSOC);
 

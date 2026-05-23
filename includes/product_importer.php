@@ -113,10 +113,17 @@ function findExistingProductMatch(PDO $pdo, array $scrapedItem): ?int
     if (count($incomingWords) > 0) {
         // Fetch recent products to compare against (limit to 1000 to keep it fast)
         // We only compare if at least one key word matches to speed up the loop
-        $firstWord = array_values($incomingWords)[0];
+        $brandsToIgnore = ['samsung', 'apple', 'lg', 'sony', 'panasonic', 'abans', 'philips', 'hisense', 'singer', 'nokia', 'xiaomi', 'oppo', 'vivo', 'huawei', 'kapruka', 'softlogic'];
+        $queryWord = array_values($incomingWords)[0];
+        foreach ($incomingWords as $word) {
+            if (!in_array(strtolower($word), $brandsToIgnore) && strlen($word) > 2) {
+                $queryWord = $word;
+                break;
+            }
+        }
 
         $stmt = $pdo->prepare("SELECT id, name FROM products WHERE name LIKE ? ORDER BY id DESC LIMIT 1000");
-        $stmt->execute(["%{$firstWord}%"]);
+        $stmt->execute(["%{$queryWord}%"]);
         $candidates = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         $bestMatchId = null;
@@ -199,19 +206,34 @@ function queueScrapedProduct(PDO $pdo, array $item): void
                 ->execute([$matchId, $item['store_id'], $item['product_url'], $item['price']]);
 
             // Update or insert the price record for this store
-            $pStmt = $pdo->prepare("SELECT id FROM product_prices WHERE product_id = ? AND store_id = ?");
+            $pStmt = $pdo->prepare("SELECT id, price FROM product_prices WHERE product_id = ? AND store_id = ? LIMIT 1");
             $pStmt->execute([$matchId, $item['store_id']]);
 
             if ($pRow = $pStmt->fetch()) {
+                $oldPrice = (float) $pRow['price'];
+                $newPrice = (float) $item['price'];
 
-                // Price already on record — just refresh it
-                $pdo->prepare("UPDATE product_prices SET price = ?, product_url = ?, last_updated = NOW() WHERE id = ?")
-                    ->execute([$item['price'], $item['product_url'], $pRow['id']]);
+                if (abs($oldPrice - $newPrice) > 0.009) {
+                    // Log price history only when price changed
+                    $pdo->prepare("INSERT INTO price_history (product_id, store_id, price) VALUES (?, ?, ?)")
+                        ->execute([$matchId, $item['store_id'], $newPrice]);
+
+                    // Price already on record — just refresh it
+                    $pdo->prepare("UPDATE product_prices SET price = ?, product_url = ?, last_updated = NOW() WHERE id = ?")
+                        ->execute([$item['price'], $item['product_url'], $pRow['id']]);
+                } else {
+                    // Just refresh last_updated time
+                    $pdo->prepare("UPDATE product_prices SET last_updated = NOW() WHERE id = ?")
+                        ->execute([$pRow['id']]);
+                }
             } else {
-
                 // First time we've seen this store selling this product
                 $pdo->prepare("INSERT INTO product_prices (product_id, store_id, price, product_url, stock_status, last_updated) VALUES (?, ?, ?, ?, ?, NOW())")
                     ->execute([$matchId, $item['store_id'], $item['price'], $item['product_url'], $item['stock_status'] ?? 'in_stock']);
+
+                // Insert into price history
+                $pdo->prepare("INSERT INTO price_history (product_id, store_id, price) VALUES (?, ?, ?)")
+                    ->execute([$matchId, $item['store_id'], $item['price']]);
             }
 
             $pdo->commit();
@@ -271,6 +293,10 @@ function queueScrapedProduct(PDO $pdo, array $item): void
             // Add the initial price record
             $pdo->prepare("INSERT INTO product_prices (product_id, store_id, price, original_price, product_url, stock_status, last_updated) VALUES (?, ?, ?, NULL, ?, ?, NOW())")
                 ->execute([$newProductId, $item['store_id'], $item['price'], $item['product_url'], $item['stock_status'] ?? 'in_stock']);
+
+            // Log initial price in history
+            $pdo->prepare("INSERT INTO price_history (product_id, store_id, price) VALUES (?, ?, ?)")
+                ->execute([$newProductId, $item['store_id'], $item['price']]);
 
             $pdo->commit();
         } catch (Exception $e) {
@@ -379,8 +405,11 @@ function scrapeCategoryPage(PDO $pdo, int $storeId, string $url, string $parserC
             continue;
         }
 
-        // Clean up the price — some scrapers return strings like "45,000"
-        $item['price'] = (float) str_replace([',', ' '], '', $item['price']);
+        // Clean up the price — handle currency prefixes (e.g. Rs, LKR) and commas
+        if (is_string($item['price'])) {
+            $item['price'] = preg_replace('/[^0-9.]/', '', $item['price']);
+        }
+        $item['price'] = (float) $item['price'];
 
         if ($item['price'] <= 0) continue;
 

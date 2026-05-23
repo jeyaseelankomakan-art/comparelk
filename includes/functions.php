@@ -176,7 +176,7 @@ function searchProducts(string $keyword, ?int $categoryId = null, ?float $minPri
         $params[] = $maxPrice;
     }
 
-    if ($sort === 'price_asc') {
+    if ($sort === 'price_asc' || $sort === 'price') {
         $orderBy = 'min_price ASC';
     } elseif ($sort === 'relevance' || $sort === 'latest') {
         $orderBy = 'p.created_at DESC, p.id DESC';
