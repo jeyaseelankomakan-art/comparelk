@@ -90,9 +90,10 @@ function getProductsByCategory(int $categoryId, string $sort = 'latest', int $li
         SELECT p.*,
                MIN(pp.price) AS min_price,
                COUNT(DISTINCT pp.store_id) AS store_count,
-               MAX(pp.last_updated) AS last_updated
+               MAX(pp.last_updated) AS last_updated,
+               (SELECT COUNT(*) FROM product_prices WHERE product_id = p.id) AS total_prices
         FROM products p
-        LEFT JOIN product_prices pp ON p.id = pp.product_id
+        LEFT JOIN product_prices pp ON p.id = pp.product_id AND pp.stock_status != 'out_of_stock'
         WHERE p.category_id = ?
         GROUP BY p.id
         ORDER BY $orderBy
@@ -190,9 +191,10 @@ function searchProducts(string $keyword, ?int $categoryId = null, ?float $minPri
                MIN(pp.price) AS min_price,
                COUNT(DISTINCT pp.store_id) AS store_count,
                MAX(pp.last_updated) AS last_updated,
-               c.name AS category_name
+               c.name AS category_name,
+               (SELECT COUNT(*) FROM product_prices WHERE product_id = p.id) AS total_prices
         FROM products p
-        LEFT JOIN product_prices pp ON p.id = pp.product_id
+        LEFT JOIN product_prices pp ON p.id = pp.product_id AND pp.stock_status != 'out_of_stock'
         LEFT JOIN categories c ON p.category_id = c.id
         WHERE " . implode(' AND ', $where) . "
         GROUP BY p.id
@@ -216,9 +218,10 @@ function getLatestProducts(int $limit = 8): array
                MIN(pp.price) AS min_price,
                COUNT(DISTINCT pp.store_id) AS store_count,
                MAX(pp.last_updated) AS last_updated,
-               c.name AS category_name
+               c.name AS category_name,
+               (SELECT COUNT(*) FROM product_prices WHERE product_id = p.id) AS total_prices
         FROM products p
-        LEFT JOIN product_prices pp ON p.id = pp.product_id
+        LEFT JOIN product_prices pp ON p.id = pp.product_id AND pp.stock_status != 'out_of_stock'
         LEFT JOIN categories c ON p.category_id = c.id
         GROUP BY p.id
         ORDER BY COALESCE(MAX(pp.last_updated), p.created_at) DESC

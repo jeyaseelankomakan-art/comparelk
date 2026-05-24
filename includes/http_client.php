@@ -39,6 +39,9 @@ function httpFetch(string $url, array $options = []): array
     }
 
     $body     = curl_exec($ch);
+    if ($body === false) {
+        $body = '';
+    }
     $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $err      = curl_error($ch);
     $bypassed = null;

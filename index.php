@@ -230,6 +230,8 @@ $stores = getStores();
                             <?= formatPrice((float) $product['min_price']) ?>
                             <span class="pcard-onwards">onwards</span>
                         </div>
+                        <?php elseif (isset($product['total_prices']) && $product['total_prices'] > 0): ?>
+                        <div class="pcard-no-price text-danger" style="font-weight: 600;"><?= e(t('out_of_stock')) ?></div>
                         <?php else: ?>
                         <div class="pcard-no-price"><?= e(t('no_price_yet')) ?></div>
                         <?php endif; ?>

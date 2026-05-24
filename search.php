@@ -13,15 +13,6 @@ $sort = in_array($_GET['sort'] ?? '', ['price', 'latest']) ? $_GET['sort'] : 'la
 $results = [];
 if ($q !== '') {
     $results = searchProducts($q, $catId, $minPrice, $maxPrice, $sort);
-    
-    // If no products found, automatically redirect to the contact page
-    // Pre-fill the contact form with the missing product so they can request it
-    if (empty($results)) {
-        $subject = urlencode("Product Not Found Request");
-        $msg = urlencode("I searched for \"{$q}\" but could not find any results. Could you please add it?");
-        redirect(url("pages/contact.php?subject={$subject}&message={$msg}"));
-        exit;
-    }
 }
 
 require_once 'includes/lang.php';
@@ -137,16 +128,20 @@ $allCats = getCategories();
                 </div>
 
             <?php elseif (empty($results)): ?>
-                <!-- This will technically never render due to the redirect above, but keeping as a safe fallback -->
                 <div class="empty-state">
                     <div class="empty-state-icon"><i class="bi bi-search"></i></div>
                     <h5>No results for "<?= e($q) ?>"</h5>
-                    <p class="text-muted">You will be redirected to the contact page...</p>
-                    <script>window.location.href = "<?= url('pages/contact.php') ?>"; </script>
-                    <a href="<?= url('index.php') ?>" class="btn"
-                        style="background:var(--primary);color:#fff;border-color:var(--primary);font-weight:600;border-radius:12px;padding:.65rem 1.5rem;">
-                        <i class="bi bi-grid me-2"></i>Browse Categories
-                    </a>
+                    <p class="text-muted">We couldn't find any products matching your search. You can try adjusting your filters, or request this product to be added.</p>
+                    <div class="d-flex justify-content-center gap-3 mt-3 flex-wrap">
+                        <a href="<?= url('index.php') ?>" class="btn"
+                            style="background:var(--primary);color:#fff;border-color:var(--primary);font-weight:600;border-radius:12px;padding:.65rem 1.5rem;">
+                            <i class="bi bi-grid me-2"></i>Browse Categories
+                        </a>
+                        <a href="<?= url('pages/contact.php?subject=' . urlencode('Product Request') . '&message=' . urlencode('I searched for "' . $q . '" but could not find any results. Could you please add it?')) ?>" class="btn btn-outline-primary"
+                            style="font-weight:600;border-radius:12px;padding:.65rem 1.5rem;">
+                            <i class="bi bi-envelope me-2"></i>Request Product
+                        </a>
+                    </div>
                 </div>
 
             <?php else: ?>
@@ -176,6 +171,8 @@ $allCats = getCategories();
                                         <?php endif; ?>
                                         <?php if ($product['min_price']): ?>
                                             <div class="product-price mt-2"><?= formatPrice((float) $product['min_price']) ?></div>
+                                        <?php elseif (isset($product['total_prices']) && $product['total_prices'] > 0): ?>
+                                            <div class="product-price mt-2 text-danger" style="font-size: 0.9rem; font-weight: 600;"><?= e(t('out_of_stock')) ?></div>
                                         <?php endif; ?>
                                         <div class="product-meta d-flex align-items-center justify-content-between">
                                             <span class="store-count-badge">

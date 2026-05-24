@@ -23,13 +23,15 @@ ensureScraperTables($pdo);
 $limit = isset($argv[1]) && ctype_digit($argv[1]) ? (int)$argv[1] : 25;
 $limit = max(1, $limit);
 
-$stmt = $pdo->query("
+$stmt = $pdo->prepare("
     SELECT *
     FROM product_store_links
     WHERE auto_enabled = 1
     ORDER BY (last_scraped_at IS NULL) DESC, last_scraped_at ASC
-    LIMIT {$limit}
+    LIMIT ?
 ");
+$stmt->bindValue(1, $limit, PDO::PARAM_INT);
+$stmt->execute();
 $links = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 if (PHP_SAPI === 'cli') {

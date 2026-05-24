@@ -54,6 +54,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['price'])) {
         if (!$pId || !$storeId || !$price || !$url) {
             $error = 'All fields are required.';
         } else {
+            // Check if price changed before recording history
+            $existingStmt = $pdo->prepare("SELECT price FROM product_prices WHERE product_id=? AND store_id=? LIMIT 1");
+            $existingStmt->execute([$pId, $storeId]);
+            $existingRow = $existingStmt->fetch();
+            $priceChanged = !$existingRow || abs((float)$existingRow['price'] - $price) > 0.009;
+
             if ($priceId) {
                 // Update existing price
                 $stmt = $pdo->prepare("UPDATE product_prices SET product_id=?, store_id=?, price=?, product_url=?, stock_status=?, last_updated=NOW() WHERE id=?");
@@ -70,8 +76,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['price'])) {
             }
 
             // Record price history
-            $stmt2 = $pdo->prepare("INSERT INTO price_history (product_id, store_id, price) VALUES (?, ?, ?)");
-            $stmt2->execute([$pId, $storeId, $price]);
+            if ($priceChanged) {
+                $stmt2 = $pdo->prepare("INSERT INTO price_history (product_id, store_id, price) VALUES (?, ?, ?)");
+                $stmt2->execute([$pId, $storeId, $price]);
+            }
 
             // Ensure scraper mapping exists / updated
             require_once __DIR__ . '/../includes/scraper.php';
@@ -267,7 +275,7 @@ $allStores = $pdo->query("SELECT * FROM stores ORDER BY name")->fetchAll();
                                     <a href="<?= url('admin/prices.php?edit_price=' . $cp['id']) ?>"
                                         class="btn btn-icon btn-outline-primary me-1"><i class="bi bi-pencil"></i></a>
                                     <form method="POST" action="<?= url('admin/prices.php') ?>" class="d-inline">
-                                        <input type="hidden" name="token" value="<?= csrf_token() ?>">
+                                        <?= csrf_field() ?>
                                         <input type="hidden" name="delete_price_id" value="<?= $cp['id'] ?>">
                                         <input type="hidden" name="product_id" value="<?= $productId ?>">
                                         <button type="submit" class="btn btn-icon btn-outline-danger" title="Delete price">

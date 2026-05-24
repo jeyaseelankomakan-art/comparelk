@@ -395,7 +395,10 @@ function extractOriginalPriceFromHtml(string $html, float $actualPrice, string $
     // the sale price but use HTML-entity-encoded markup inside JS rather than
     // standard <del> tags. Scan all Rs. amounts, filter out installment/bank
     // plan amounts, and pick the smallest value above the sale price.
-    if (preg_match_all('/\b(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/i', $html, $matches, PREG_OFFSET_CAPTURE)) {
+    // Scan only first 30% of the HTML to avoid matching unrelated prices (accessory/warranty/related products) in footers.
+    $scanLength = (int)(strlen($html) * 0.30);
+    $scanHtml = substr($html, 0, $scanLength);
+    if (preg_match_all('/\b(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d{1,2})?)/i', $scanHtml, $matches, PREG_OFFSET_CAPTURE)) {
         $installmentKeywords = [
             'payment plan',
             'installment',
@@ -413,6 +416,19 @@ function extractOriginalPriceFromHtml(string $html, float $actualPrice, string $
             'buy now pay later',
             'split into',
             'pay in',
+            'warranty',
+            'accessory',
+            'accessories',
+            'bundle',
+            'gift card',
+            'voucher',
+            'coupon',
+            'cashback',
+            'delivery',
+            'shipping',
+            'insurance',
+            'protection plan',
+            'extended',
         ];
         $wasCandidates = [];
         foreach ($matches[1] as $match) {
@@ -535,7 +551,9 @@ function scrapeProductStoreLink(PDO $pdo, array $link): array
             // Trigger DB update if:
             // 1. The main price changed
             // 2. The original price changed (e.g. sale began, or sale ended)
-            if (abs($oldPrice - $price) > 0.009 || $originalPrice !== $oldOrig) {
+            $origChanged = ($originalPrice === null) !== ($oldOrig === null)
+                || ($originalPrice !== null && $oldOrig !== null && abs((float)$originalPrice - (float)$oldOrig) > 0.009);
+            if (abs($oldPrice - $price) > 0.009 || $origChanged) {
                 // Log history only when actual price changed
                 if (abs($oldPrice - $price) > 0.009) {
                     $pdo->prepare("INSERT INTO price_history (product_id, store_id, price) VALUES (?, ?, ?)")

@@ -56,6 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $productId = (int) ($_POST['product_id'] ?? 0);
             $storeId = (int) ($_POST['store_id'] ?? 0);
             $price = (float) ($_POST['price'] ?? 0);
+            $originalPrice = isset($_POST['original_price']) && $_POST['original_price'] !== '' ? (float) $_POST['original_price'] : null;
             $url = trim($_POST['product_url'] ?? '');
             $status = $_POST['stock_status'] ?? 'in_stock';
             $backUrl = trim($_POST['back_url'] ?? '');
@@ -63,18 +64,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$productId || !$storeId || !$price || !$url) {
                 $error = 'Please fill in all fields to add the price.';
             } else {
+                // Check if price changed before recording history
+                $existingStmt = $pdo->prepare("SELECT price FROM product_prices WHERE product_id=? AND store_id=? LIMIT 1");
+                $existingStmt->execute([$productId, $storeId]);
+                $existingRow = $existingStmt->fetch();
+                $priceChanged = !$existingRow || abs((float)$existingRow['price'] - $price) > 0.009;
+
                 // Upsert into product_prices
                 $stmt = $pdo->prepare("
-                    INSERT INTO product_prices (product_id, store_id, price, product_url, stock_status, last_updated)
-                    VALUES (?, ?, ?, ?, ?, NOW())
-                    ON DUPLICATE KEY UPDATE price=VALUES(price), product_url=VALUES(product_url),
+                    INSERT INTO product_prices (product_id, store_id, price, original_price, product_url, stock_status, last_updated)
+                    VALUES (?, ?, ?, ?, ?, ?, NOW())
+                    ON DUPLICATE KEY UPDATE price=VALUES(price), original_price=VALUES(original_price), product_url=VALUES(product_url),
                                             stock_status=VALUES(stock_status), last_updated=NOW()
                 ");
-                $stmt->execute([$productId, $storeId, $price, $url, $status]);
+                $stmt->execute([$productId, $storeId, $price, $originalPrice, $url, $status]);
 
                 // Record price history
-                $pdo->prepare("INSERT INTO price_history (product_id, store_id, price) VALUES (?, ?, ?)")
-                    ->execute([$productId, $storeId, $price]);
+                if ($priceChanged) {
+                    $pdo->prepare("INSERT INTO price_history (product_id, store_id, price) VALUES (?, ?, ?)")
+                        ->execute([$productId, $storeId, $price]);
+                }
 
                 // Ensure scraper link exists
                 ensureScraperTables($pdo);
@@ -369,6 +378,7 @@ $links = $linksStmt->fetchAll(PDO::FETCH_ASSOC);
                     <?= csrf_field() ?>
                     <input type="hidden" name="action" value="quick_add_price">
                     <input type="hidden" name="back_url" value="<?= htmlspecialchars($fetchUrl) ?>">
+                    <input type="hidden" name="original_price" value="<?= !empty($result['origPrice']) ? htmlspecialchars($result['origPrice']) : '' ?>">
 
                     <div class="mb-2">
                         <label class="form-label mb-1" style="font-size:.78rem;">Product <span

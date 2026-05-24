@@ -18,8 +18,15 @@ if (!$product) {
 }
 
 $prices = getProductPrices($id);
-$bestPrice = !empty($prices) ? $prices[0]['price'] : null; // already sorted ASC
-$bestPriceOriginal = !empty($prices) ? $prices[0]['original_price'] : null;
+$bestPrice = null;
+$bestPriceOriginal = null;
+foreach ($prices as $p) {
+    if (($p['stock_status'] ?? 'in_stock') !== 'out_of_stock') {
+        $bestPrice = $p['price'];
+        $bestPriceOriginal = $p['original_price'];
+        break;
+    }
+}
 
 // Build chart data
 $chartData = [];
@@ -102,6 +109,11 @@ require_once 'includes/header.php';
                             <td class="text-muted py-1">Best Price</td>
                             <td class="fw-700 text-price"><?= formatPrice((float) $bestPrice) ?></td>
                         </tr>
+                    <?php elseif (!empty($prices)): ?>
+                        <tr>
+                            <td class="text-muted py-1">Best Price</td>
+                            <td class="fw-700 text-danger" style="font-size: 0.9rem;"><?= e(t('out_of_stock')) ?></td>
+                        </tr>
                     <?php endif; ?>
                 </table>
             </div>
@@ -149,6 +161,19 @@ require_once 'includes/header.php';
                         </div>
                         <div class="text-muted" style="font-size:.78rem;">Lowest price across <?= count($prices) ?>
                             store<?= count($prices) != 1 ? 's' : '' ?></div>
+                    </div>
+                </div>
+            <?php elseif (!empty($prices)): ?>
+                <div class="out-of-stock-banner rounded-xl p-3 mb-4 d-flex align-items-center gap-3">
+                    <div style="font-size:2rem;color:#ea5455;"><i class="bi bi-exclamation-triangle-fill"></i></div>
+                    <div>
+                        <div
+                            style="font-size:.75rem;color:#ea5455;font-weight:700;text-transform:uppercase;letter-spacing:.5px;">
+                            Out of Stock</div>
+                        <div style="font-size:1.2rem;font-weight:750;color:#ea5455;">
+                            Currently unavailable at all listed stores
+                        </div>
+                        <div class="text-muted" style="font-size:.78rem;">Check individual stores below for product links or stock updates.</div>
                     </div>
                 </div>
             <?php endif; ?>
